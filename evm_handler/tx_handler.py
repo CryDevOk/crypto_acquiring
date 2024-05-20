@@ -30,7 +30,7 @@ async def trx_balance(conn_creds, addr_id, address):
 async def trc20_balance(conn_creds, addr_id, contract_address, address: str):
     try:
         async with async_client.AsyncEth(*conn_creds) as client:
-            contract = async_client.ERC20(client, contract_address, abi_info=Cfg.trc20_min_abi)
+            contract = async_client.ERC20(client, contract_address, abi_info=Cfg.erc20_abi)
             res = await contract.balanceOf(address)
     except Exception as exc:
         return None, exc, (addr_id, contract_address, conn_creds)
