@@ -1,0 +1,42 @@
+version: "3.5"
+
+
+services:
+  proc_api:
+    image: proc_api:${PROC_API_IMAGE_TAG}
+    container_name: proc_api
+    env_file:
+      - .env_proc_api
+    tty: true
+    command: ["/bin/bash", "./entrypoint.sh"]
+    restart: always
+    networks:
+      - acquiring
+    sysctls:
+      net.core.somaxconn: 4096
+    volumes:
+      - /var/log/proc_api:/app/logs
+      - /var/log/proc_api/openresty:/usr/local/openresty/nginx/logs
+
+  eth_sepolia:
+    image: proc_eth:${PROC_TRON_IMAGE_TAG}
+    container_name: eth_sepolia
+    env_file:
+      - .env_proc_eth_sepolia
+    command: ["/bin/bash", "./entrypoint.sh"]
+    restart: always
+    tty: true
+    networks:
+      - acquiring
+    volumes:
+      - /var/log/eth_sepolia:/app/logs
+
+networks:
+  acquiring:
+    name: acquiring-network
+    driver: bridge
+
+volumes:
+  static_storage:
+    name: static_storage
+    driver: local
