@@ -26,7 +26,7 @@ services:
       - acquiring
 
   proc_api:
-    image: proc_api:${PROC_API_IMAGE_TAG}
+    image: proc_api:latest
     container_name: proc_api
     env_file:
       - .env_proc_api
@@ -42,7 +42,7 @@ services:
       - /var/log/proc_api/openresty:/usr/local/openresty/nginx/logs
 
   eth_sepolia:
-    image: proc_eth:${PROC_TRON_IMAGE_TAG}
+    image: proc_eth:latest
     container_name: eth_sepolia
     env_file:
       - .env_proc_eth_sepolia
@@ -56,7 +56,7 @@ services:
 
 networks:
   acquiring:
-    name: acquiring-network
+    name: acquiring
     driver: bridge
 
 volumes:
