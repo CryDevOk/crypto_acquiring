@@ -1,4 +1,4 @@
-docker build -f ./base_image/Dockerfile -t base_image:latest ./base_image
+docker build -f ./base_image_python/Dockerfile -t base_image:latest ./base_image_python
 docker build -f ./evm_handler/Dockerfile -t proc_eth:latest ./evm_handler
 
 # Create DataBases
