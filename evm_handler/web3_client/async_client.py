@@ -240,14 +240,14 @@ async def test():
     from web3.eth import Eth
 
     async with AsyncEth("https://sepolia.infura.io/v3/bfe1a422517541399a1ffa598756b45a", 11155111) as client:
-        # contract = ERC20(client, "0x0f1a713859fB1d1afAc99Fe2D20CAf639560EC83", min_abi)
+        # contract = ERC20(client, "0x0f1a713859fB1d1afAc99Fe2D20CAf639560EC83", erc20_abi)
         data = {"fromBlock": "0x5aa3b9",
                 "toBlock": "0x5aa3b9",
                 "topics": ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"]}
-        print(await client.get_logs(data))
-        # data = await client.get_block_by_number("0x5aa3b9")
+        # print(await client.get_logs(data))
+        # data = await client.get_block_by_number(hex(2345324))
         # print(data)
-        # print(await contract.balanceOf("0x66f39eb22fA3F0664Cb0AA2BaaC402fE23925c64"))
+        # print(await contract.balanceOf("0xF31B086459C2cdaC006Feedd9080223964a9cDdB"))
 
 
 if __name__ == "__main__":

@@ -63,13 +63,12 @@ class Config(object):
     config_coins = os.environ.get("PROC_HANDLER_COINS")
 
     network_name = os.environ.get("PROC_HANDLER_NETWORK_NAME")
-    network_id = os.environ.get("PROC_HANDLER_NETWORK_ID")
+    network_id = int(os.environ.get("PROC_HANDLER_NETWORK_ID"))
     start_block = os.environ.get("PROC_HANDLER_START_BLOCK", "latest")
 
     PROC_HANDLER_API_KEY = os.environ.get("PROC_HANDLER_API_KEY")
 
     assert network_name is not None, "PROC_HANDLER_NETWORK_NAME must be set"
-
     assert validators.url(grpc_server), "PROC_HANDLER_PROVIDER_URL must be a valid URL"
     assert validators.url(scanner_url), "PROC_HANDLER_SCANNER_URL must be a valid URL"
     assert isinstance(start_block,

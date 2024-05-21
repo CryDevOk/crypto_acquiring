@@ -2,13 +2,11 @@
 import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-import aioschedule
 import asyncio
 from decimal import Decimal
 from typing import Dict
 
 from config import Config as Cfg
-import api
 
 
 def get_round_for_rate(rate: Decimal, quote_asset_precision=Decimal(0.01)) -> Decimal:
@@ -58,19 +56,6 @@ class AsyncPool(asyncio.Queue):
     def put_all(self, list_items):
         for item in list_items:
             self.put_nowait(item)
-
-
-class MyScheduler(aioschedule.Scheduler):
-    async def run_pending(self, *args, **kwargs):
-        jobs = [self._run_job(job) for job in self.jobs if job.should_run]
-        if not jobs:
-            return [], []
-        return await asyncio.wait(jobs, *args, **kwargs)
-
-    async def _run_job(self, job):
-        ret = await job.run()
-        if isinstance(ret, aioschedule.CancelJob) or ret is aioschedule.CancelJob:
-            self.cancel_job(job)
 
 
 class SharedVariables:

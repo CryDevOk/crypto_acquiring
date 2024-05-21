@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # Description: This module contains the main logic of the ERC20 parser and the native coin.
 
-from misc import get_logger, MyScheduler, SharedVariables, amount_to_quote_amount, \
+from misc import get_logger, SharedVariables, amount_to_quote_amount, \
     get_round_for_rate, amount_to_display
 import asyncio
 import logging
@@ -9,6 +9,7 @@ from typing import List, Tuple, Dict
 from decimal import Decimal
 import eth_utils
 import eth_abi
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from web3_client import async_client
 from db.database import DB, write_async_session, read_async_session
@@ -243,8 +244,12 @@ async def block_parser(conn_creds_1, conn_creds_2, logger: logging.Logger):
                     logger.warning(
                         f"Slippage for the block pasring more then {Cfg.block_offset} in {Cfg.allowed_slippage} times")
 
-                tasks = [asyncio.create_task(client1.get_logs(current_block)),
-                         asyncio.create_task(client2.get_block_by_number(hex(current_block)))]
+                data = {"fromBlock": eth_utils.to_hex(current_block),
+                        "toBlock": eth_utils.to_hex(current_block),
+                        "topics": ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"]}
+
+                tasks = [asyncio.create_task(client1.get_logs(data)),
+                         asyncio.create_task(client2.get_block_by_number(eth_utils.to_hex(current_block)))]
 
                 try:
                     transactions, block = await asyncio.gather(*tasks)
@@ -275,7 +280,7 @@ async def block_parser(conn_creds_1, conn_creds_2, logger: logging.Logger):
 
 async def main():
     startup_logger = get_logger("startup_logger")
-    scheduler = MyScheduler()
+    scheduler = AsyncIOScheduler()
     reserved_conn_creds1 = await variables.api_keys_pool.get()
     reserved_conn_creds2 = await variables.api_keys_pool.get()
     try:
@@ -288,15 +293,18 @@ async def main():
     else:
         startup_logger.info("launch success")
 
-        scheduler.every(10).seconds.do(update_coin_rates, get_logger("update_coin_rates"))
-        scheduler.every(10).seconds.do(update_in_memory_accounts, get_logger("update_in_memory_accounts"))
-        scheduler.every(30).seconds.do(admin_coins_bal, get_logger("admin_coins_bal"))
-        scheduler.every(30).seconds.do(admin_approve_native_bal, get_logger("admin_approve_native_bal"))
-        scheduler.every(1).seconds.do(block_parser, reserved_conn_creds1, reserved_conn_creds2, get_logger("block_parser"))
-
+        scheduler.add_job(update_coin_rates, "interval", seconds=10, args=(get_logger("update_coin_rates"),))
+        scheduler.add_job(update_in_memory_accounts, "interval", seconds=10,
+                          args=(get_logger("update_in_memory_accounts"),))
+        scheduler.add_job(admin_coins_bal, "interval", seconds=30, args=(get_logger("admin_coins_bal"),))
+        scheduler.add_job(admin_approve_native_bal, "interval", seconds=30,
+                          args=(get_logger("admin_approve_native_bal"),))
+        scheduler.add_job(block_parser, "interval", seconds=3, max_instances=1, args=(reserved_conn_creds1,
+                                                                                      reserved_conn_creds2,
+                                                                                      get_logger("block_parser")))
+        scheduler.start()
         while True:
-            await scheduler.run_pending()
-            await asyncio.sleep(1)
+            await asyncio.sleep(1000)
 
 
 if __name__ == '__main__':
