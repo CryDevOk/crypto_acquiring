@@ -26,8 +26,7 @@ asyncpg==0.28.0
 
 # blockchain
 tronpy==0.4.0
-eth_utils==2.2.0
-eth_account==0.9.0
+web3==6.19.0
 mnemonic==0.20
 
 # other
