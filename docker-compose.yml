@@ -38,8 +38,8 @@ services:
     sysctls:
       net.core.somaxconn: 4096
     volumes:
-      - /var/log/proc_api:/app/logs
-      - /var/log/proc_api/openresty:/usr/local/openresty/nginx/logs
+      - ./logs/proc_api:/app/logs
+      - ./logs/proc_api/openresty:/usr/local/openresty/nginx/logs
 
   eth_sepolia:
     image: proc_eth:latest
@@ -47,12 +47,12 @@ services:
     env_file:
       - .env_proc_eth_sepolia
     command: ["/bin/bash", "./entrypoint.sh"]
-    restart: always
+    restart: no
     tty: true
     networks:
       - acquiring
     volumes:
-      - /var/log/eth_sepolia:/app/logs
+      - ./logs/eth_sepolia:/app/logs
 
 networks:
   acquiring:
