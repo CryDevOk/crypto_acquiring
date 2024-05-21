@@ -3,17 +3,22 @@ import asyncio
 import eth_utils
 import eth_abi
 import httpx
-from eth_utils import to_checksum_address
 import time
 from typing import Union, List, Tuple, Dict
 from web3.eth import Eth
 from web3.auto import w3
 
-from providers import AsyncHTTPProvider
 import eth_account
 from eth_typing import ChecksumAddress
-from exceptions import Web3Exception, StuckTransaction, TransactionNotFound, AlreadyKnown, UnderpricedTransaction, \
-    InsufficientFundsForTx, TransactionFailed
+
+from .providers import AsyncHTTPProvider
+from .exceptions import Web3Exception, \
+    StuckTransaction, \
+    TransactionNotFound, \
+    AlreadyKnown, \
+    UnderpricedTransaction, \
+    InsufficientFundsForTx, \
+    TransactionFailed
 
 
 def hex_to_int(hex_str):
@@ -167,7 +172,7 @@ class AsyncEth():
 class AsyncContract():
     def __init__(self, client: AsyncEth, contract_address: str, abi_info):
         self.client = client
-        self.contract_address = to_checksum_address(contract_address)
+        self.contract_address = eth_utils.to_checksum_address(contract_address)
         self.abi_info = abi_info
         self.contract_obj = Eth(w3).contract(self.contract_address, abi=abi_info, decode_tuples=True)
 

@@ -1,9 +1,8 @@
-from eth_account.messages import encode_defunct
 import eth_utils
 import eth_account
 from eth_utils.exceptions import ValidationError
-import json
 from typing import List, Tuple
+
 
 def is_valid_address(address: str) -> bool:
     try:
@@ -11,6 +10,7 @@ def is_valid_address(address: str) -> bool:
         return True
     except ValidationError:
         return False
+
 
 def create_pair() -> Tuple[str, str]:
     t = eth_account.Account.create()
