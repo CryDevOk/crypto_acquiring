@@ -54,7 +54,7 @@ class Blocks(Base):
 
 class Coins(Base):
     __tablename__ = 'coins'
-    contract_address = Column(String(34), primary_key=True)  # contract address or "native"
+    contract_address = Column(String(42), primary_key=True)  # contract address or "native"
     name = Column(String(16), nullable=False)
     decimal = Column(Integer, nullable=False)
     min_amount = Column(NUMERIC(36, 18), nullable=False)
@@ -74,7 +74,7 @@ class UserAddress(Base):
     admin_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), nullable=True, unique=False)
     approve_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), nullable=True, unique=False)
 
-    public = Column(String(34), nullable=False, unique=True)
+    public = Column(String(42), nullable=False, unique=True)
     private = Column(EncryptedData(128), nullable=False, unique=True)
 
     locked_by_tx = Column(BOOLEAN, default=False)
@@ -93,7 +93,7 @@ class Balances(Base):
     __tablename__ = 'balances'
     id = Column(Integer, primary_key=True)
     address_id = Column(Integer, ForeignKey('user_address.id', ondelete='CASCADE'), nullable=False, unique=False)
-    coin_id = Column(String(34), ForeignKey('coins.contract_address', ondelete='CASCADE'), nullable=False, unique=False)
+    coin_id = Column(String(42), ForeignKey('coins.contract_address', ondelete='CASCADE'), nullable=False, unique=False)
 
     balance = Column(NUMERIC(36, 18), nullable=False, default=0)
 
@@ -110,7 +110,7 @@ class Deposits(Base):
     address_id = Column(Integer, ForeignKey('user_address.id', ondelete='CASCADE'), nullable=False, unique=False)
     address = relationship("UserAddress", back_populates="_user_deposit")
 
-    contract_address = Column(String(34), ForeignKey('coins.contract_address', ondelete='CASCADE'), nullable=False, unique=False)
+    contract_address = Column(String(42), ForeignKey('coins.contract_address', ondelete='CASCADE'), nullable=False, unique=False)
     coin = relationship("Coins", back_populates="_coin_deposit")
 
     time_to_callback = Column(TIMESTAMP, nullable=False, default=lambda: datetime.fromtimestamp(0))
@@ -137,7 +137,7 @@ class Withdrawals(Base):
     user_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), nullable=False, unique=False)
     user = relationship("Users", back_populates="_user_withdrawal")
 
-    contract_address = Column(String(34), ForeignKey('coins.contract_address', ondelete='CASCADE'), nullable=False, unique=False)
+    contract_address = Column(String(42), ForeignKey('coins.contract_address', ondelete='CASCADE'), nullable=False, unique=False)
     coin = relationship("Coins", back_populates="_coin_withdrawal")
 
     time_to_callback = Column(TIMESTAMP, nullable=False, default=lambda: datetime.fromtimestamp(0))
@@ -155,7 +155,7 @@ class Withdrawals(Base):
     tx_hash_out = Column(String(66), nullable=True, unique=True)
 
     created_at = Column(TIMESTAMP, nullable=False, default=func.now())
-    withdrawal_address = Column(String(34), nullable=False)
+    withdrawal_address = Column(String(42), nullable=False)
     amount = Column(NUMERIC(36, 18), nullable=False)
     quote_amount = Column(BIGINT, nullable=False)
     user_currency = Column(String(16), nullable=False)
