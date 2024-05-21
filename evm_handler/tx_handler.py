@@ -244,7 +244,7 @@ async def block_parser(conn_creds_1, conn_creds_2, logger: logging.Logger):
                         f"Slippage for the block pasring more then {Cfg.block_offset} in {Cfg.allowed_slippage} times")
 
                 tasks = [asyncio.create_task(client1.get_logs(current_block)),
-                         asyncio.create_task(client2.get_block_by_number(current_block))]
+                         asyncio.create_task(client2.get_block_by_number(hex(current_block)))]
 
                 try:
                     transactions, block = await asyncio.gather(*tasks)
