@@ -25,5 +25,5 @@ psql -h localhost -U postgres -c \
 psql -h localhost -U postgres -c '\list'
 
 # Deploy the services
-docker-compose up -d eth_sepolia
+docker-compose up eth_sepolia
 
