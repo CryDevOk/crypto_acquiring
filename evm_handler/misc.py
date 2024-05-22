@@ -64,7 +64,9 @@ class SharedVariables:
         self.deposits_queue = asyncio.Queue()
 
         self.user_accounts: Dict[str, str] = {}  # {address: address_id}
+        self.user_accounts_low_case: Dict[str, str] = {}  # {address.lower(): address_id}
         self.handler_accounts: Dict[str, str] = {}  # {address: address_id}
+        self.handler_accounts_low_case: Dict[str, str] = {}
 
         self.user_accounts_event = asyncio.Event()
 

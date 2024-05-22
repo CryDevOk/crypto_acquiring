@@ -71,8 +71,9 @@ class Config(object):
     assert network_name is not None, "PROC_HANDLER_NETWORK_NAME must be set"
     assert validators.url(grpc_server), "PROC_HANDLER_PROVIDER_URL must be a valid URL"
     assert validators.url(scanner_url), "PROC_HANDLER_SCANNER_URL must be a valid URL"
-    assert isinstance(start_block,
-                      int) or start_block == "latest", "PROC_HANDLER_START_BLOCK must be an integer or 'latest'"
+
+    if start_block != "latest":
+        start_block = int(start_block)
 
     LOGGING_FORMATTER, TIME_FORMAT = '%(module)s#[LINE:%(lineno)d]# %(levelname)-3s [%(asctime)s] %(message)s', '%Y-%m-%d %H:%M:%S'
 
@@ -80,7 +81,7 @@ class Config(object):
     approve_accounts = 4
 
     allowed_slippage = 2
-    block_offset = 10
+    block_offset = 2
     min_admin_address_native_balance = 50 * (10 ** 6)
 
     WRITE_POOL_SIZE = 10

@@ -43,7 +43,7 @@ async def coin_transfer_to_admin(conn_creds,
                 try:
                     await variables.gas_price_event.wait()
                     await client.send_ether(user_public,
-                                            30_000_000,
+                                            int(100000*variables.gas_price*1.3),
                                             approve_private,
                                             gas_price=variables.gas_price,
                                             gas=21000)
@@ -237,8 +237,10 @@ async def update_in_memory_accounts(logger: logging.Logger):
         for address_id, user_address, role in users:
             if role == St.USER.v:
                 variables.user_accounts[user_address] = address_id
+                variables.user_accounts_low_case[user_address.lower()] = address_id
             else:
                 variables.handler_accounts[user_address] = address_id
+                variables.handler_accounts_low_case[user_address.lower()] = address_id
     finally:
         variables.user_accounts_event.set()
 
@@ -249,20 +251,20 @@ async def coins_txs_parser(transactions: List[dict],
     """
     This function parses the ERC20 events and creates the deposit records.
     :param transactions: List[dict]
-    :param coins: key - contract_address in hex format, value - dict with keys: name, min_amount
+    :param coins: key - contract_address string low, value - dict with keys: name, min_amount
     :param logger:
     :return:
     """
-
     deposits = []
     for unit in transactions:
         if unit.get("address") in coins and not unit.get("removed"):
-            address_received: str = eth_abi.decode(["address"], eth_utils.decode_hex(unit["topics"][2]))[0]
+            address_received: str = eth_abi.decode(["address"], eth_utils.decode_hex(unit["topics"][2]))[0] # low case
             await variables.user_accounts_event.wait()
-            address_id = variables.user_accounts.get(address_received)
+            address_id = variables.user_accounts_low_case.get(address_received)
             if address_id:
                 amount: int = eth_abi.decode(["uint256"], eth_utils.decode_hex(unit["data"]))[0]
                 coin = coins[unit["address"]]
+
                 if amount >= coin[Coins.min_amount.key]:
                     quote_amount: Decimal = amount_to_quote_amount(amount,
                                                                    coin[Coins.current_rate.key],
@@ -271,11 +273,11 @@ async def coins_txs_parser(transactions: List[dict],
                         Deposits.address_id.key: address_id,
                         Deposits.amount.key: amount,
                         Deposits.quote_amount.key: quote_amount,
-                        Deposits.contract_address.key: unit["address"],
-                        Deposits.tx_hash_in.key: unit['id']
+                        Deposits.contract_address.key: coin[Coins.contract_address.key],
+                        Deposits.tx_hash_in.key: unit['transactionHash']
                     })
                 else:
-                    logger.info(f"deposit less then minimum amount {unit['id']}")
+                    logger.info(f"deposit less then minimum amount {unit['transactionHash']}")
     return deposits
 
 
@@ -287,12 +289,14 @@ async def native_txs_parser(block: Dict, native_coin: dict, client: async_client
             recipient = unit["to"]
             amount = int(unit["value"], 16)
             await variables.user_accounts_event.wait()
-            if recipient in variables.user_accounts and sender not in variables.handler_accounts:
+
+            if recipient in variables.user_accounts_low_case and sender not in variables.handler_accounts_low_case:
+
                 receipt = await client.get_transaction_receipt(unit["hash"])
 
                 if receipt["status"] == "0x1":
                     if amount >= native_coin[Coins.min_amount.key]:
-                        address_id = variables.user_accounts[recipient]
+                        address_id = variables.user_accounts_low_case[recipient]
                         quote_amount: Decimal = amount_to_quote_amount(amount,
                                                                        native_coin[Coins.current_rate.key],
                                                                        native_coin[Coins.decimal.key])
@@ -341,7 +345,7 @@ async def block_parser(conn_creds_1, conn_creds_2, logger: logging.Logger):
                         resp = await db.get_coins(
                             [Coins.contract_address, Coins.name, Coins.current_rate, Coins.min_amount, Coins.decimal])
 
-                        coins = {coin[Coins.contract_address.key]: coin for coin in resp if
+                        coins = {coin[Coins.contract_address.key].lower(): coin for coin in resp if
                                  coin[Coins.contract_address.key] != St.native.v}
 
                         coin_txs = await coins_txs_parser(transactions, coins, logger)
@@ -413,7 +417,7 @@ async def tx_conductor_coin(logger: logging.Logger):
     reqs = []
     async with write_async_session() as session:
         db = DB(session, logger)
-        deposits = await db.get_and_lock_pending_deposits_coin(7)
+        deposits = await db.get_and_lock_pending_deposits_coin(5)
 
         if deposits:
             for deposit in deposits:
@@ -428,7 +432,7 @@ async def tx_conductor_coin(logger: logging.Logger):
                 if not err:
                     await db.update_deposit_by_id(deposit_id, {Deposits.tx_hash_out.key: tx_hash,
                                                                Deposits.locked_by_tx_handler.key: False}, commit=True)
-                elif tx_hash:
+                elif tx_hash and err:
                     logger.critical(f"{err} deposit_id: {deposit_id}, {tx_hash}")
                     await db.update_deposit_by_id(deposit_id, {Deposits.tx_hash_out.key: tx_hash})
                     await db.update_user_address_by_id(approve_id, {UserAddress.locked_by_tx.key: False},
@@ -454,12 +458,14 @@ async def main():
         await update_in_memory_last_handled_block(startup_logger)
         await update_in_memory_accounts(startup_logger)
         await update_coin_rates(startup_logger)
+        await update_gas_price(startup_logger)
     except Exception as exc:
         startup_logger.error(f"launch failed {exc}")
         raise Exception(f"launch failed {exc}")
     else:
         startup_logger.info("launch success")
-
+        scheduler.add_job(update_gas_price, "interval", seconds=60,
+                          args=(get_logger("update_gas_price"),))
         scheduler.add_job(update_coin_rates, "interval", seconds=10,
                           args=(get_logger("update_coin_rates"),))
         scheduler.add_job(update_in_memory_accounts, "interval", seconds=10,
