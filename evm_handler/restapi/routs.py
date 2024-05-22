@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from typing import List, Dict, Union
 
 from db.database import DB, write_async_session, read_async_session
-from db.models import Coins, Users
+from db.models import Coins, User
 from config import Config as Cfg, StatCode as St
 from misc import get_logger, quote_amount_to_amount, get_round_for_rate, amount_to_display, amount_to_quote_amount
 from web3_client import utils
@@ -120,7 +120,7 @@ async def get_withdraw_info(request: Request):
         if request.headers.get("Api-Key") == Cfg.PROC_HANDLER_API_KEY:
             async with read_async_session() as session:
                 db = DB(session, route_logger)
-                user = await db.get_user_by_id(user_id, [Users.id])
+                user = await db.get_user_by_id(user_id, [User.id])
                 if user:
                     resp = await db.get_coins([Coins.contract_address,
                                                Coins.name,

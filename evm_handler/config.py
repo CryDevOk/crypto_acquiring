@@ -88,7 +88,7 @@ class Config(object):
 
     quote_coin = "USDT"
     quote_decimal_factor = 1
-    min_amount_native = 10000000
-    fee_native = 1000000
+    min_amount_native = int(0.001 * 10 ** 18)
+    fee_native = int(0.001 * 10 ** 18)
 
     native_warning_threshold = 10  # count of transaction that can wallet handle before it's balance will be low

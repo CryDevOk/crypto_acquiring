@@ -37,8 +37,8 @@ class EncryptedData(TypeDecorator):
             return aes_decrypt(value, Cfg.DB_SECRET_KEY)  # Replace 'key' with your encryption key
 
 
-class Users(Base):
-    __tablename__ = 'users'
+class User(Base):
+    __tablename__ = 'user'
     id = Column(String(36), primary_key=True)
     role = Column(Integer, nullable=False)
 
@@ -70,18 +70,18 @@ class Coins(Base):
 class UserAddress(Base):
     __tablename__ = 'user_address'
     id = Column(Integer, Identity(start=1, cycle=True), primary_key=True)
-    user_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), nullable=False, unique=True)
-    admin_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), nullable=True, unique=False)
-    approve_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), nullable=True, unique=False)
+    user_id = Column(String(36), ForeignKey('user.id', ondelete='CASCADE'), nullable=False, unique=True)
+    admin_id = Column(String(36), ForeignKey('user.id', ondelete='CASCADE'), nullable=True, unique=False)
+    approve_id = Column(String(36), ForeignKey('user.id', ondelete='CASCADE'), nullable=True, unique=False)
 
     public = Column(String(42), nullable=False, unique=True)
     private = Column(EncryptedData(128), nullable=False, unique=True)
 
     locked_by_tx = Column(BOOLEAN, default=False)
 
-    user = relationship("Users", backref='_user_address', foreign_keys=[user_id])
-    admin = relationship("Users", backref='_admin_address', foreign_keys=[admin_id])
-    approve = relationship("Users", backref='_approve_address', foreign_keys=[approve_id])
+    user = relationship("User", backref='_user_address', foreign_keys=[user_id])
+    admin = relationship("User", backref='_admin_address', foreign_keys=[admin_id])
+    approve = relationship("User", backref='_approve_address', foreign_keys=[approve_id])
 
     _user_deposit = relationship("Deposits", back_populates="address", cascade="all, delete-orphan")
     _admin_withdrawal = relationship("Withdrawals", back_populates="admin_addr", cascade="all, delete-orphan")
@@ -134,8 +134,8 @@ class Withdrawals(Base):
     __tablename__ = "withdrawals"
     id = Column(String(36), primary_key=True, server_default=text("uuid_generate_v4()"))
 
-    user_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), nullable=False, unique=False)
-    user = relationship("Users", back_populates="_user_withdrawal")
+    user_id = Column(String(36), ForeignKey('user.id', ondelete='CASCADE'), nullable=False, unique=False)
+    user = relationship("User", back_populates="_user_withdrawal")
 
     contract_address = Column(String(42), ForeignKey('coins.contract_address', ondelete='CASCADE'), nullable=False, unique=False)
     coin = relationship("Coins", back_populates="_coin_withdrawal")
@@ -186,4 +186,4 @@ def my_func1(target, connection, **kw):
 
 @event.listens_for(Coins.__table__, "after_create")
 def my_func2(target, connection, **kw):
-    connection.execute(text(f"INSERT INTO coins (contract_address, name, decimal, min_amount, fee_amount, is_active) VALUES ('{St.native.v}', 'TRX', 6, {Cfg.min_amount_native}, {Cfg.fee_native}, true)"))
+    connection.execute(text(f"INSERT INTO coins (contract_address, name, decimal, min_amount, fee_amount, is_active) VALUES ('{St.native.v}', 'ETH', 18, {Cfg.min_amount_native}, {Cfg.fee_native}, true)"))
