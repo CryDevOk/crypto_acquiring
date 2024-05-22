@@ -6,6 +6,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.types import TypeDecorator, LargeBinary
 from sqlalchemy.orm import relationship
 from Crypto.Cipher import AES
+from hashlib import sha256
 import os
 
 
@@ -34,6 +35,15 @@ class EncryptedData(TypeDecorator):
             return aes_decrypt(value, Cfg.DB_SECRET_KEY)  # Replace 'key' with your encryption key
 
 
+class HashedData(TypeDecorator):
+    impl = LargeBinary
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        if value is not None:
+            return sha256(Cfg.DB_SECRET_KEY + value.encode("utf-8")).digest()
+
+
 Base = declarative_base()
 
 
@@ -42,7 +52,7 @@ class Customer(Base):
     id = Column(String(36), primary_key=True, server_default=text("uuid_generate_v4()"))
     callback_url = Column(String(255), nullable=False, unique=True)
     callback_api_key = Column(EncryptedData(255), nullable=False)
-    api_key = Column(EncryptedData(255), nullable=False, unique=True)
+    api_key = Column(HashedData(32), nullable=False, unique=True)
 
     user = relationship("User", back_populates="customer", cascade="all, delete-orphan")
 

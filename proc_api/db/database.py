@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 from sqlalchemy.dialects import postgresql
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy import and_
 from sqlalchemy.sql import select
 
-from .models import User, NetworkHandlers, Customer
+from db.models import User, NetworkHandlers, Customer
 from config import Config as Cfg
 
 
@@ -23,7 +23,7 @@ read_async_session = async_sessionmaker(read_engine, expire_on_commit=False, aut
 
 
 class DB(object):
-    def __init__(self, session, logger=None):
+    def __init__(self, session:AsyncSession, logger=None):
         self.session = session
         self.logger = logger
 
@@ -48,7 +48,9 @@ class DB(object):
         else:
             stmt = select(Customer.id).where(and_(Customer.id == customer_id, Customer.api_key == api_key))
         resp = await self.session.execute(stmt)
-        return resp.rowcount == 1
+        data = resp.fetchall()
+        print(data)
+        return len(data) == 1
 
     async def insert_user(self, user_id, customer_id, role):
         stmt = postgresql.insert(User).values({User.id.key: user_id,
