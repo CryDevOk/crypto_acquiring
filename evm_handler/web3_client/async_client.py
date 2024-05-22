@@ -225,14 +225,14 @@ class ERC20(AsyncContract):
         return await self.send_transaction("approve", (to_, amount), signer_key, gas_price, gas, nonce)
 
     async def transfer_from(self, from_, to_, amount, signer_key, gas_price, gas=100000, nonce=None):
-        return await self.send_transaction("transfer_from", (from_, to_, amount), signer_key, gas_price, gas, nonce)
+        return await self.send_transaction("transferFrom", (from_, to_, amount), signer_key, gas_price, gas, nonce)
 
     async def allowance(self, owner, spender) -> int:
         resp = await self.call_contract("allowance", (owner, spender))
         return resp[0]
 
     async def balance_of(self, address) -> int:
-        resp = await self.call_contract("balance_of", (address,))
+        resp = await self.call_contract("balanceOf", (address,))
         return resp[0]
 
 

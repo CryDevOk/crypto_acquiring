@@ -71,7 +71,9 @@ class SharedVariables:
         self.api_keys_pool = AsyncPool()
         self.api_keys_pool.put_all([(Cfg.grpc_server, Cfg.network_id)] * 10)
         self.coins_abi: Dict[str, Dict] = {}
-        self.estimated_native_fee = 3_000_000  # TODO parse it using blocks
+
+        self.gas_price_event = asyncio.Event()
+        self.gas_price = 0
 
 
 startup_logger = get_logger("startup_logger")

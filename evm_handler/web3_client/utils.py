@@ -72,7 +72,7 @@ erc20_abi = [
                 "type": "uint256"
             }
         ],
-        "name": "transfer_from",
+        "name": "transferFrom",
         "outputs": [
             {
                 "name": "",
@@ -105,7 +105,7 @@ erc20_abi = [
                 "type": "address"
             }
         ],
-        "name": "balance_of",
+        "name": "balanceOf",
         "outputs": [
             {
                 "name": "balance",
