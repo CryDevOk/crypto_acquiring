@@ -3,7 +3,7 @@ from urllib.parse import urljoin
 import httpx
 from httpx import Timeout
 
-from .exceptions import Web3Exception, \
+from web3_client.exceptions import Web3Exception, \
     TransactionNotFound, \
     StuckTransaction, \
     AlreadyKnown, \

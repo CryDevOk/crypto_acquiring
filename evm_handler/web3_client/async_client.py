@@ -11,14 +11,15 @@ from web3.auto import w3
 import eth_account
 from eth_typing import ChecksumAddress
 
-from .providers import AsyncHTTPProvider
-from .exceptions import Web3Exception, \
+from web3_client.providers import AsyncHTTPProvider
+from web3_client.exceptions import Web3Exception, \
     StuckTransaction, \
     TransactionNotFound, \
     AlreadyKnown, \
     UnderpricedTransaction, \
     InsufficientFundsForTx, \
     TransactionFailed
+from web3_client.utils import generate_mnemonic, keys_from_mnemonic, erc20_abi
 
 
 def hex_to_int(hex_str):
@@ -223,33 +224,55 @@ class ERC20(AsyncContract):
     async def approve(self, to_, amount, signer_key, gas_price, gas=100000, nonce=None):
         return await self.send_transaction("approve", (to_, amount), signer_key, gas_price, gas, nonce)
 
-    async def transferFrom(self, from_, to_, amount, signer_key, gas_price, gas=100000, nonce=None):
-        return await self.send_transaction("transferFrom", (from_, to_, amount), signer_key, gas_price, gas, nonce)
+    async def transfer_from(self, from_, to_, amount, signer_key, gas_price, gas=100000, nonce=None):
+        return await self.send_transaction("transfer_from", (from_, to_, amount), signer_key, gas_price, gas, nonce)
 
     async def allowance(self, owner, spender) -> int:
         resp = await self.call_contract("allowance", (owner, spender))
         return resp[0]
 
-    async def balanceOf(self, address) -> int:
-        resp = await self.call_contract("balanceOf", (address,))
+    async def balance_of(self, address) -> int:
+        resp = await self.call_contract("balance_of", (address,))
         return resp[0]
 
 
-async def test():
-    from web3.auto import w3
-    from web3.eth import Eth
+async def distribute_eth(client: AsyncEth, accounts: List[eth_account.account.LocalAccount], amount: int,
+                         priv_key: str):
+    gas_price = int((await client.gas_price()) * 1.5)
+    for acc in accounts:
+        resp = await client.send_ether(acc.address, amount, priv_key, gas_price=gas_price, gas=21000)
+        print(resp)
 
-    async with AsyncEth("https://sepolia.infura.io/v3/bfe1a422517541399a1ffa598756b45a", 11155111) as client:
-        # contract = ERC20(client, "0x0f1a713859fB1d1afAc99Fe2D20CAf639560EC83", erc20_abi)
-        data = {"fromBlock": "0x5aa3b9",
-                "toBlock": "0x5aa3b9",
-                "topics": ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"]}
-        # print(await client.get_logs(data))
-        # data = await client.get_block_by_number(hex(2345324))
-        # print(data)
-        # print(await contract.balanceOf("0xF31B086459C2cdaC006Feedd9080223964a9cDdB"))
+
+async def distribute_erc20(client: AsyncEth,
+                           accounts: List[eth_account.account.LocalAccount],
+                           amount: int,
+                           priv_key: str,
+                           contract_address: str):
+    contract = ERC20(client, contract_address, erc20_abi)
+    gas_price = int((await client.gas_price()) * 1.5)
+    for account in accounts:
+        resp = await contract.transfer(account.address, amount, priv_key, gas_price)
+        print(resp)
+
+
+async def prepare_new_accounts():
+    address_count: int = 4
+    eth_amount = 0.1
+    wei_amount = int(eth_amount * 10 ** 18)
+    coin_amount = 20_000_000
+    priv_key = ""
+    contract_address = ""
+    network_id = 11155111
+    provider_url = ""
+
+    mnem = generate_mnemonic()
+    print(mnem)
+    accounts = keys_from_mnemonic(mnem, address_count)
+    async with AsyncEth(provider_url, network_id) as client:
+        await distribute_eth(client, accounts, wei_amount, priv_key)
+        await distribute_erc20(client, accounts, coin_amount, priv_key, contract_address)
 
 
 if __name__ == "__main__":
-    print("This module is not for direct call!")
-    asyncio.run(test())
+    asyncio.run(prepare_new_accounts())

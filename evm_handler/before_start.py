@@ -25,10 +25,10 @@ async def insert_users(mnemonic, count_users, role, offset):
         keys = utils.keys_from_mnemonic(mnemonic, count_users, offset)
         ret = []
         for i in range(count_users):
-            print(St(role), keys[i][0])
+            print(St(role), keys[i].address, keys[i].key.hex())
             try:
                 user_id = uuid.uuid4().hex
-                await db.add_account(user_id, None, None, *keys[i], role)
+                await db.add_account(user_id, None, None, keys[i].address, keys[i].key.hex(), role)
             except sqlalchemy_exc.IntegrityError as exc:
                 if "unique" in str(exc.orig):
                     pass

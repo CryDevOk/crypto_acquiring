@@ -11,7 +11,7 @@ import eth_utils
 import eth_abi
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from web3_client import async_client
+from web3_client import async_client, utils as web3_utils
 from db.database import DB, write_async_session, read_async_session
 from db.models import Deposits, Coins
 from config import Config as Cfg, StatCode as St
@@ -31,8 +31,8 @@ async def trx_balance(conn_creds, addr_id, address):
 async def trc20_balance(conn_creds, addr_id, contract_address, address: str):
     try:
         async with async_client.AsyncEth(*conn_creds) as client:
-            contract = async_client.ERC20(client, contract_address, abi_info=Cfg.erc20_abi)
-            res = await contract.balanceOf(address)
+            contract = async_client.ERC20(client, contract_address, abi_info=web3_utils.erc20_abi)
+            res = await contract.balance_of(address)
     except Exception as exc:
         return None, exc, (addr_id, contract_address, conn_creds)
     else:
