@@ -49,7 +49,6 @@ class DB(object):
             stmt = select(Customer.id).where(and_(Customer.id == customer_id, Customer.api_key == api_key))
         resp = await self.session.execute(stmt)
         data = resp.fetchall()
-        print(data)
         return len(data) == 1
 
     async def insert_user(self, user_id, customer_id, role):
