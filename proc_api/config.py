@@ -23,7 +23,7 @@ class Config(object):
     PATH = os.environ.get("APP_PATH", "/app").rstrip("/")
     WRITE_DSN = os.environ.get("PROC_API_WRITE_DSN")
     READ_DSN = os.environ.get("PROC_API_READ_DSN")
-    DB_SECRET_KEY = os.environ.get("PROC_DB_SECRET_KEY").encode()
+    DB_SECRET_KEY = os.environ.get("PROC_API_DB_SECRET_KEY").encode()
     PROC_API_KEY = os.environ.get("PROC_API_KEY")
     PROC_HANDLER_URLS = os.environ.get("PROC_HANDLER_URLS")
 
