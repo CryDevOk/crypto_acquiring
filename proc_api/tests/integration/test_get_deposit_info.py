@@ -19,6 +19,7 @@ def test_behavior(input_data, expected_status_code, expected_response):
     assert response.status_code == expected_status_code
     if response.status_code == 200:
         data = response.json()
+        print(data)
         assert isinstance(data, dict)
         for v in data.values():
             assert isinstance(v, dict)
