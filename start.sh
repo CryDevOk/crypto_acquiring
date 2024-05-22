@@ -3,6 +3,7 @@ docker build -f ./proc_api/Dockerfile -t proc_api:latest ./proc_api
 docker build -f ./evm_handler/Dockerfile -t proc_eth:latest ./evm_handler
 
 # Create DataBases
+docker-compose up -d httpbin
 docker-compose up -d postgres
 export PGPASSWORD=postgres
 wait_for_postgresql() {
@@ -26,6 +27,6 @@ psql -h localhost -U postgres -c \
 psql -h localhost -U postgres -c '\list'
 
 # Deploy the services
-docker-compose up -d  eth_sepolia
-docker-compose up proc_api
+docker-compose up -d proc_api
+docker-compose up eth_sepolia
 
