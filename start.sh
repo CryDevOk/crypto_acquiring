@@ -1,4 +1,5 @@
 docker build -f ./base_image_python/Dockerfile -t base_image:latest ./base_image_python
+docker build -f ./proc_api/Dockerfile -t proc_api:latest ./proc_api
 docker build -f ./evm_handler/Dockerfile -t proc_eth:latest ./evm_handler
 
 # Create DataBases
@@ -25,5 +26,6 @@ psql -h localhost -U postgres -c \
 psql -h localhost -U postgres -c '\list'
 
 # Deploy the services
-docker-compose up eth_sepolia
+docker-compose up -d  eth_sepolia
+docker-compose up proc_api
 

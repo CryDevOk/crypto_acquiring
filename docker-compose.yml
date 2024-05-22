@@ -37,6 +37,8 @@ services:
       - acquiring
     sysctls:
       net.core.somaxconn: 4096
+    ports:
+      - "127.0.0.1:8470:8470" # for local testing
     volumes:
       - ./logs/proc_api:/app/logs
       - ./logs/proc_api/openresty:/usr/local/openresty/nginx/logs
