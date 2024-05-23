@@ -13,7 +13,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from datetime import datetime, timedelta, timezone
 
 from web3_client import async_client, utils as web3_utils
-from db.database import DB, write_async_session, read_async_session, UserAddress
+from db.database import DB, write_async_session, read_async_session, UserAddress, Withdrawals
 from db.models import Deposits, Coins
 from config import Config as Cfg, StatCode as St
 import api
@@ -43,7 +43,7 @@ async def coin_transfer_to_admin(conn_creds,
                 try:
                     await variables.gas_price_event.wait()
                     await client.send_ether(user_public,
-                                            int(100000*variables.gas_price*1.3),
+                                            int(100000 * variables.gas_price * 1.3),
                                             approve_private,
                                             gas_price=variables.gas_price,
                                             gas=21000)
@@ -81,6 +81,52 @@ async def coin_transfer_to_admin(conn_creds,
                     return None, exc, (deposit_id, tx_handler_period, approve_id), conn_creds
                 else:
                     return res, None, (deposit_id, tx_handler_period, approve_id), conn_creds
+
+
+async def withdraw_coin(conn_creds,
+                        contract_address,
+                        withdrawal_address,
+                        amount,
+                        admin_private,
+                        withdrawal_id,
+                        tx_handler_period,
+                        admin_addr_id,
+                        **_
+                        ):
+    amount = int(amount)
+    try:
+        async with async_client.AsyncEth(*conn_creds) as client:
+            contract = async_client.ERC20(client, contract_address, abi_info=web3_utils.erc20_abi)
+            await variables.gas_price_event.wait()
+            res = await contract.transfer(withdrawal_address, amount, admin_private, gas_price=variables.gas_price)
+    except Exception as exc:
+        return None, exc, (withdrawal_id, tx_handler_period, admin_addr_id), conn_creds
+    else:
+        return res, None, (withdrawal_id, tx_handler_period, admin_addr_id), conn_creds
+
+
+async def withdraw_native(conn_creds,
+                          withdrawal_address,
+                          amount,
+                          admin_private,
+                          withdrawal_id,
+                          tx_handler_period,
+                          admin_addr_id,
+                          **_
+                          ):
+    amount = int(amount)
+    try:
+        async with async_client.AsyncEth(*conn_creds) as client:
+            await variables.gas_price_event.wait()
+            res = await client.send_ether(withdrawal_address,
+                                          amount,
+                                          admin_private,
+                                          gas_price=variables.gas_price,
+                                          gas=21000)
+    except Exception as exc:
+        return None, exc, (withdrawal_id, tx_handler_period, admin_addr_id), conn_creds
+    else:
+        return res, None, (withdrawal_id, tx_handler_period, admin_addr_id), conn_creds
 
 
 async def native_balance(conn_creds, addr_id, address):
@@ -122,8 +168,9 @@ async def admin_approve_native_bal(logger):
                 await variables.api_keys_pool.put(conn_creds)
                 if not err:
                     if balance <= (variables.gas_price * 100000) * Cfg.native_warning_threshold:
-                        logger.warning(f"{addr_id} {address}: has balance {amount_to_display(balance, 18, Decimal('0.00001'))} "
-                                       f"and can handle less then {Cfg.native_warning_threshold} transactions")
+                        logger.warning(
+                            f"{addr_id} {address}: has balance {amount_to_display(balance, 18, Decimal('0.00001'))} "
+                            f"and can handle less then {Cfg.native_warning_threshold} transactions")
                     await db.upsert_balance(addr_id, St.native.v, balance, commit=True)
                 else:
                     logger.error(f"{addr_id}: {err}")
@@ -258,7 +305,7 @@ async def coins_txs_parser(transactions: List[dict],
     deposits = []
     for unit in transactions:
         if unit.get("address") in coins and not unit.get("removed"):
-            address_received: str = eth_abi.decode(["address"], eth_utils.decode_hex(unit["topics"][2]))[0] # low case
+            address_received: str = eth_abi.decode(["address"], eth_utils.decode_hex(unit["topics"][2]))[0]  # low case
             await variables.user_accounts_event.wait()
             address_id = variables.user_accounts_low_case.get(address_received)
             if address_id:
@@ -447,10 +494,47 @@ async def tx_conductor_coin(logger: logging.Logger):
                                                   commit=True)
 
 
+async def withdraw_handler(logger: logging.Logger):
+    reqs = []
+    async with write_async_session() as session:
+        db = DB(session, logger)
+        withdrawals = await db.get_and_lock_pending_withdrawals(Cfg.admin_accounts)
+
+        if withdrawals:
+            for withdrawal in withdrawals:
+                contract_address = withdrawal[Withdrawals.contract_address.key]
+                conn_creds: List[Tuple[str, str]] = await variables.api_keys_pool.get()
+                if contract_address == St.native.v:
+                    reqs.append(asyncio.create_task(withdraw_native(conn_creds, **withdrawal)))
+                else:
+                    reqs.append(asyncio.create_task(withdraw_coin(conn_creds, **withdrawal)))
+
+            results = await asyncio.gather(*reqs)
+
+            for tx_hash, err, req_ident, conn_creds in results:
+                await variables.api_keys_pool.put(conn_creds)
+                withdrawal_id, tx_handler_period, adm_address_id = req_ident
+                if not err:
+                    await db.update_withdrawal_by_id(withdrawal_id, {Withdrawals.tx_hash_out.key: tx_hash}, commit=True)
+                elif tx_hash:
+                    logger.critical(f"{err} withdrawal_id: {withdrawal_id}")
+                    await db.update_withdrawal_by_id(withdrawal_id, {Withdrawals.tx_hash_out.key: tx_hash})
+                    await db.update_user_address_by_id(adm_address_id, {UserAddress.locked_by_tx.key: False},
+                                                       commit=True)
+                else:
+                    time_to_tx_handler = datetime.now(timezone.utc) + timedelta(tx_handler_period)
+                    tx_handler_period += 15
+                    await db.update_withdrawal_by_id(
+                        withdrawal_id, {Withdrawals.admin_addr_id.key: None,
+                                        Withdrawals.time_to_tx_handler.key: time_to_tx_handler,
+                                        Withdrawals.tx_handler_period.key: tx_handler_period}, commit=True)
+                    logger.error(f"{err} withdrawal_id: {withdrawal_id}")
+
+
 async def main():
     startup_logger = get_logger("startup_logger")
     scheduler = AsyncIOScheduler()
-    scheduler._logger.setLevel(logging.ERROR) # to avoid apscheduler noise warning logs
+    scheduler._logger.setLevel(logging.ERROR)  # to avoid apscheduler noise warning logs
 
     reserved_conn_creds1 = await variables.api_keys_pool.get()
     reserved_conn_creds2 = await variables.api_keys_pool.get()
@@ -480,6 +564,8 @@ async def main():
                           args=(get_logger("tx_conductor_coin"),))
         scheduler.add_job(tx_conductor_native, "interval", seconds=1, max_instances=1,
                           args=(get_logger("tx_conductor_native"),))
+        scheduler.add_job(withdraw_handler, "interval", seconds=1, max_instances=1,
+                          args=(get_logger("withdraw_handler"),))
 
         scheduler.start()
         while True:
