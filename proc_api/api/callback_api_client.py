@@ -22,15 +22,15 @@ class ClientException(Exception):
 
 
 class Client(object):
-    def __init__(self, server: str, api_key=None):
-        self.server = server.rstrip('/')
+    def __init__(self, server, api_key=None):
+        self.server = server
         self.API_KEY = api_key
         self.headers = {"accept": "application/json", "Api-Key": self.API_KEY}
 
-    async def _api_request(self, method, path, **kwargs):
+    async def _api_request(self, method, url, **kwargs):
         timeout = httpx.Timeout(timeout=10)
         async with httpx.AsyncClient(timeout=timeout) as session:
-            resp = await session.request(method, self.server + path, headers=self.headers, **kwargs)
+            resp = await session.request(method, self.server + url, headers=self.headers, **kwargs)
             try:
                 data = resp.json()
             except json.JSONDecodeError:
@@ -44,8 +44,5 @@ class Client(object):
     async def readiness(self):
         return await self._api_request('GET', '/readiness')
 
-    async def add_callback(self, callback_id, user_id, path, json_data):
-        return await self._api_request('POST', '/v1/api/private/callback', json={"callback_id": callback_id,
-                                                                                 "user_id": user_id,
-                                                                                 "path": path,
-                                                                                 "json_data": json_data})
+    async def callback(self, path: str, json_data):
+        return await self._api_request('POST', path, json=json_data)

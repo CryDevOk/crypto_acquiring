@@ -48,7 +48,6 @@ async def upsert_coins(coins):
 
 
 def parse_coins(coins):
-    # USDC|6|1000000|3000000|0x0f1a713859fB1d1afAc99Fe2D20CAf639560EC83,...
     ret_data = []
     coins = coins.split(",")
     addresses = set()
@@ -77,10 +76,10 @@ def parse_coins(coins):
 async def startup():
     try:
         await create_models()
-        await insert_users(Cfg.ADMIN_SEED, Cfg.admin_accounts, St.SADMIN.v, 0)
-        await insert_users(Cfg.ADMIN_SEED, Cfg.approve_accounts, St.APPROVE.v, Cfg.admin_accounts)
         coins = parse_coins(Cfg.config_coins)
         await upsert_coins(coins)
+        await insert_users(Cfg.ADMIN_SEED, Cfg.admin_accounts, St.SADMIN.v, 0)
+        await insert_users(Cfg.ADMIN_SEED, Cfg.approve_accounts, St.APPROVE.v, Cfg.admin_accounts)
     except Exception as exc:
         print(f"Error: {exc}")
         startup_logger.error(f"Error: {exc}")

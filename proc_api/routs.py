@@ -3,16 +3,19 @@
 from db.database import DB, write_async_session, read_async_session
 from db.models import NetworkHandlers
 from config import Config as Cfg, StatCode as St
-from misc import route_logger, app
+from misc import get_logger
 
 from sqlalchemy import exc as sqlalchemy_exc
 from fastapi.responses import JSONResponse
-from fastapi import Response, Request
-import handler_api_client
+from fastapi import Response, Request, FastAPI
+from api import handler_api_client
 import asyncio
 from decimal import Decimal
 import os
 from uuid import uuid4
+
+app = FastAPI()
+route_logger = get_logger("route_logger")
 
 
 def json_success_response(data: dict, status_code: int) -> Response:
@@ -72,19 +75,50 @@ async def add_customer(request: Request):
                 try:
                     await db.insert_customer(customer_id, callback_url, callback_api_key, api_key)
                 except sqlalchemy_exc.IntegrityError as exc:
-                    await session.rollback()
                     if "unique" in str(exc.orig):
                         return json_error_response("Customer already exists", 409)
                     else:
                         route_logger.error(f"Unexpected error: {exc}")
                         return json_error_response("Service temporary unavailable", 503)
                 except Exception as exc:
-                    await session.rollback()
                     route_logger.critical(f"Unexpected error: {exc}")
                     return json_error_response("Service temporary unavailable", 503)
                 else:
                     await session.commit()
                     return json_success_response({"customer_id": customer_id, "api_key": api_key}, 200)
+        else:
+            return json_error_response("Wrong Api-Key", 401)
+
+
+@app.post(f"/v1/api/private/callback")
+async def callback(request: Request):
+    input_data = await request.json()
+    try:
+        callback_id = input_data["callback_id"]
+        user_id = input_data["user_id"]
+        path = input_data["path"]
+        json_data = input_data["json_data"]
+        assert isinstance(json_data, dict)
+    except (KeyError, AssertionError):
+        return json_error_response("Not enough or wrong arguments", 400)
+    else:
+        if request.headers.get("Api-Key") == Cfg.PROC_API_KEY:
+            async with write_async_session() as session:
+                db = DB(session, route_logger)
+                try:
+                    await db.insert_callback(callback_id, user_id, path, json_data)
+                except sqlalchemy_exc.IntegrityError as exc:
+                    if "unique" in str(exc.orig):
+                        return json_error_response("Callback already exists", 409)
+                    else:
+                        route_logger.error(f"Unexpected error: {exc}")
+                        return json_error_response("Service temporary unavailable", 503)
+                except Exception as exc:
+                    route_logger.critical(f"Unexpected error: {exc}")
+                    return json_error_response("Service temporary unavailable", 503)
+                else:
+                    await session.commit()
+                    return json_success_response({}, 200)
         else:
             return json_error_response("Wrong Api-Key", 401)
 

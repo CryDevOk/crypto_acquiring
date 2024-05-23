@@ -1,5 +1,5 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, Identity, NUMERIC, BOOLEAN, TIMESTAMP, func, event, DDL, \
-    text, LargeBinary, UniqueConstraint, BIGINT
+from sqlalchemy import Column, Integer, String, ForeignKey, Identity, NUMERIC, BOOLEAN, func, event, DDL, \
+    text, LargeBinary, UniqueConstraint, BIGINT, DateTime
 from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declarative_base
 from Crypto.Cipher import AES
@@ -7,7 +7,7 @@ from datetime import datetime
 import os
 from sqlalchemy.types import TypeDecorator
 
-from config import Config as Cfg, StatCode as St
+from config import Config as Cfg
 
 Base = declarative_base()
 
@@ -113,18 +113,18 @@ class Deposits(Base):
     contract_address = Column(String(42), ForeignKey('coins.contract_address', ondelete='CASCADE'), nullable=False, unique=False)
     coin = relationship("Coins", back_populates="_coin_deposit")
 
-    time_to_callback = Column(TIMESTAMP, nullable=False, default=lambda: datetime.fromtimestamp(0))
+    time_to_callback = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.fromtimestamp(0))
     callback_period = Column(Integer, nullable=False, default=60)
     locked_by_callback = Column(BOOLEAN, default=False)
     is_notified = Column(BOOLEAN, default=False)
 
-    time_to_tx_handler = Column(TIMESTAMP, nullable=False, default=lambda: datetime.fromtimestamp(0))
+    time_to_tx_handler = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.fromtimestamp(0))
     tx_handler_period = Column(Integer, nullable=False, default=60)
     locked_by_tx_handler = Column(BOOLEAN,
                                   default=False)  # показывает что этот депозит выполняется обработчиком транзакций
     tx_hash_out = Column(String(66), nullable=True, unique=True)
 
-    created_at = Column(TIMESTAMP, nullable=False, default=func.now())
+    created_at = Column(DateTime(timezone=True), nullable=False, default=func.now())
     tx_hash_in = Column(String(66), nullable=False, unique=True)
     amount = Column(NUMERIC(36, 18), nullable=False)
     quote_amount = Column(NUMERIC(36, 18), nullable=False)
@@ -140,12 +140,12 @@ class Withdrawals(Base):
     contract_address = Column(String(42), ForeignKey('coins.contract_address', ondelete='CASCADE'), nullable=False, unique=False)
     coin = relationship("Coins", back_populates="_coin_withdrawal")
 
-    time_to_callback = Column(TIMESTAMP, nullable=False, default=lambda: datetime.fromtimestamp(0))
+    time_to_callback = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.fromtimestamp(0))
     callback_period = Column(Integer, nullable=False, default=60)
     locked_by_callback = Column(BOOLEAN, default=False)
     is_notified = Column(BOOLEAN, default=False)
 
-    time_to_tx_handler = Column(TIMESTAMP, nullable=False, default=lambda: datetime.fromtimestamp(0))
+    time_to_tx_handler = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.fromtimestamp(0))
     tx_handler_period = Column(Integer, nullable=False, default=60)
 
     admin_addr_id = Column(Integer, ForeignKey('user_address.id', ondelete='CASCADE'), nullable=True,
@@ -154,7 +154,7 @@ class Withdrawals(Base):
 
     tx_hash_out = Column(String(66), nullable=True, unique=True)
 
-    created_at = Column(TIMESTAMP, nullable=False, default=func.now())
+    created_at = Column(DateTime(timezone=True), nullable=False, default=func.now())
     withdrawal_address = Column(String(42), nullable=False)
     amount = Column(NUMERIC(36, 18), nullable=False)
     quote_amount = Column(BIGINT, nullable=False)
@@ -183,7 +183,3 @@ CREATE TRIGGER on_update_deposits
 def my_func1(target, connection, **kw):
     connection.execute(ddl_stmt1)
     connection.execute(ddl_stmt2)
-
-@event.listens_for(Coins.__table__, "after_create")
-def my_func2(target, connection, **kw):
-    connection.execute(text(f"INSERT INTO coins (contract_address, name, decimal, min_amount, fee_amount, is_active) VALUES ('{St.native.v}', 'ETH', 18, {Cfg.min_amount_native}, {Cfg.fee_native}, true)"))

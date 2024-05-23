@@ -52,8 +52,6 @@ class Config(object):
     PROC_HANDLER_DISPLAY = os.environ.get("PROC_HANDLER_DISPLAY")
     ADMIN_SEED = os.environ.get("PROC_HANDLER_ADMIN_SEED")
 
-    METRICS_PATH = PATH + f"/metrics/metrics_{PROC_HANDLER_NAME}.prom"
-
     WRITE_DSN = os.environ.get("PROC_HANDLER_WRITE_DSN")
     READ_DSN = os.environ.get("PROC_HANDLER_READ_DSN")
     DB_SECRET_KEY = os.environ.get("PROC_HANDLER_DB_SECRET_KEY").encode()
@@ -67,6 +65,8 @@ class Config(object):
     start_block = os.environ.get("PROC_HANDLER_START_BLOCK", "latest")
 
     PROC_HANDLER_API_KEY = os.environ.get("PROC_HANDLER_API_KEY")
+    PROC_URL = os.environ.get("PROC_URL")
+    PROC_API_KEY = os.environ.get("PROC_API_KEY")
 
     assert network_name is not None, "PROC_HANDLER_NETWORK_NAME must be set"
     assert validators.url(grpc_server), "PROC_HANDLER_PROVIDER_URL must be a valid URL"
@@ -89,7 +89,5 @@ class Config(object):
 
     quote_coin = "USDT"
     quote_decimal_factor = 1
-    min_amount_native = int(0.001 * 10 ** 18)
-    fee_native = int(0.001 * 10 ** 18)
 
     native_warning_threshold = 10  # count of transaction that can wallet handle before it's balance will be low

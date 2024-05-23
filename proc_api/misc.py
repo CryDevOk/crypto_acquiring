@@ -3,10 +3,7 @@
 import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from fastapi import FastAPI
 from config import Config as Cfg
-
-app = FastAPI()
 
 
 def get_logger(name):
@@ -27,6 +24,3 @@ def get_logger(name):
 path = Path(Cfg.LOG_PATH)
 path.mkdir(parents=True, exist_ok=True)
 
-bd_logger = get_logger("proc_api_bd_logger")
-route_logger = get_logger("proc_api_route_logger")
-startup_logger = get_logger("proc_api_startup_logger")

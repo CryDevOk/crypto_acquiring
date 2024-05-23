@@ -2,10 +2,10 @@
 # Description: This module contains the main logic of the ERC20 parser and the native coin.
 
 from misc import get_logger, SharedVariables, amount_to_quote_amount, \
-    get_round_for_rate, amount_to_display
+    get_round_for_rate, amount_to_display, proc_api_client
 import asyncio
 import logging
-from typing import List, Tuple, Dict, Any
+from typing import List, Tuple, Dict, Any, Union
 from decimal import Decimal
 import eth_utils
 import eth_abi
@@ -127,6 +127,61 @@ async def withdraw_native(conn_creds,
         return None, exc, (withdrawal_id, tx_handler_period, admin_addr_id), conn_creds
     else:
         return res, None, (withdrawal_id, tx_handler_period, admin_addr_id), conn_creds
+
+
+async def notify_deposit(display_amount: str,
+                         deposit_id,
+                         callback_period: int,
+                         quote_amount: Decimal,
+                         tx_hash_in: str,
+                         user_id,
+                         coin_name,
+                         **_):
+    callback_id = f"deposit_{deposit_id}"
+    path = "/v1/api/private/user/deposit"
+    json_data = {"user_id": user_id,
+                 "coin_name": coin_name,
+                 "display_amount": display_amount,
+                 "quote_amount": str(quote_amount),
+                 "description": f"deposit {deposit_id}",
+                 "tx_scaner_url": Cfg.scanner_url + tx_hash_in}
+    try:
+        await proc_api_client.add_callback(callback_id, user_id, path, json_data)
+    except Exception as exc:
+        return exc, (deposit_id, callback_period, user_id)
+    else:
+        return None, (deposit_id, callback_period, user_id)
+
+
+async def notify_withdrawal(display_amount: str,
+                            quote_amount: Decimal,
+                            withdrawal_id,
+                            tx_hash_out: str,
+                            user_id,
+                            callback_period,
+                            coin_name: str,
+                            user_currency: str,
+                            current_rate: Decimal,
+                            withdrawal_address: str,
+                            **_) -> Tuple[Union[None, dict], Union[Exception, None], Tuple]:
+    callback_id = f"withdrawal_{withdrawal_id}"
+    path = "/v1/api/private/user/notify_withdrawal"
+    json_data = {"user_id": user_id,
+                 "coin_name": coin_name,
+                 "display_amount": display_amount,
+                 "quote_amount": str(quote_amount),
+                 "user_currency": user_currency,
+                 "tx_scaner_url": Cfg.scanner_url + tx_hash_out,
+                 "withdrawal_address": withdrawal_address,
+                 "network_display": Cfg.PROC_HANDLER_DISPLAY,
+                 "rate_display": current_rate}
+
+    try:
+        resp = await proc_api_client.add_callback(callback_id, user_id, path, json_data)
+    except Exception as exc:
+        return None, exc, (withdrawal_id, callback_period)
+    else:
+        return resp, None, (withdrawal_id, callback_period)
 
 
 async def native_balance(conn_creds, addr_id, address):
@@ -464,7 +519,8 @@ async def tx_conductor_coin(logger: logging.Logger):
     reqs = []
     async with write_async_session() as session:
         db = DB(session, logger)
-        deposits = await db.get_and_lock_pending_deposits_coin(5)
+        await variables.gas_price_event.wait()
+        deposits = await db.get_and_lock_pending_deposits_coin(5, variables.gas_price * 21000)
 
         if deposits:
             for deposit in deposits:
@@ -531,6 +587,91 @@ async def withdraw_handler(logger: logging.Logger):
                     logger.error(f"{err} withdrawal_id: {withdrawal_id}")
 
 
+async def deposit_callback_handler(logger: logging.Logger):
+    reqs = []
+    async with write_async_session() as session:
+        db = DB(session, logger)
+        deposits = await db.get_and_lock_unnotified_deposits(100)
+
+        if deposits:
+            amount: Decimal
+            for data in deposits:
+                rounding: Decimal = get_round_for_rate(data[Coins.current_rate.key])
+                display_amount: str = amount_to_display(data[Deposits.amount.key],
+                                                        data[Coins.decimal.key],
+                                                        rounding
+                                                        )
+                reqs.append(asyncio.create_task(notify_deposit(display_amount=display_amount, **data)))
+
+            results = await asyncio.gather(*reqs)
+
+            for exception, req_ident in results:
+                deposit_id, callback_period, user_id = req_ident
+                if not exception:
+                    await db.update_deposit_by_id(deposit_id, {Deposits.is_notified.key: True,
+                                                               Deposits.locked_by_callback.key: False}, commit=True)
+                else:
+                    if isinstance(exception, api.proc_api_client.ClientException) and exception.http_code == 409:
+                        logger.warning(f"Deposit_id {deposit_id} {user_id} already notified")
+                        await db.update_deposit_by_id(deposit_id, {Deposits.locked_by_callback.key: False,
+                                                                   Deposits.is_notified.key: True}, commit=True)
+                    else:
+                        time_to_callback = datetime.now(timezone.utc) + timedelta(seconds=callback_period)
+                        callback_period += 60
+                        await db.update_deposit_by_id(deposit_id, {Deposits.locked_by_callback.key: False,
+                                                                   Deposits.time_to_callback.key: time_to_callback,
+                                                                   Deposits.callback_period.key: callback_period},
+                                                      commit=True)
+                        logger.error(f"Deposit_id {deposit_id} {user_id} exception: {exception}")
+
+
+async def withdrawal_callback_handler(logger: logging.Logger) -> None:
+    """
+    This function sends the withdrawal notifications to the users.
+    :param logger:
+    :return:
+    """
+    reqs = []
+    async with write_async_session() as session:
+        db = DB(session, logger)
+
+        withdrawals = await db.get_and_lock_unnotified_withdrawals(100)
+
+        if withdrawals:
+            for data in withdrawals:
+                rounding: Decimal = get_round_for_rate(data[Coins.current_rate.key])
+                data[Coins.current_rate.key] = str(data[Coins.current_rate.key].quantize(rounding + 2))
+                display_amount: str = amount_to_display(data[Withdrawals.amount.key],
+                                                        data[Coins.decimal.key],
+                                                        rounding
+                                                        )
+                reqs.append(asyncio.create_task(notify_withdrawal(display_amount=display_amount, **data)))
+            results = await asyncio.gather(*reqs)
+
+            for data, exception, req_ident in results:
+                withdrawal_id, callback_period = req_ident
+                if not exception:
+                    await db.update_withdrawal_by_id(withdrawal_id, {Withdrawals.is_notified.key: True,
+                                                                     Withdrawals.locked_by_callback.key: False},
+                                                     commit=True)
+
+                else:
+                    if isinstance(exception, api.proc_api_client.ClientException) and exception.http_code == 409:
+                        logger.warning(f"withdrawal {withdrawal_id} already notified")
+                        await db.update_withdrawal_by_id(withdrawal_id,
+                                                         {Withdrawals.locked_by_callback.key: False,
+                                                          Withdrawals.is_notified.key: True}, commit=True)
+                    else:
+                        time_to_callback = datetime.now(timezone.utc) + timedelta(seconds=callback_period)
+                        callback_period += 60
+                        await db.update_withdrawal_by_id(withdrawal_id,
+                                                         {Withdrawals.locked_by_callback.key: False,
+                                                          Withdrawals.time_to_callback.key: time_to_callback,
+                                                          Withdrawals.callback_period.key: callback_period},
+                                                         commit=True)
+                        logger.error(f"withdrawal {withdrawal_id} {exception}")
+
+
 async def main():
     startup_logger = get_logger("startup_logger")
     scheduler = AsyncIOScheduler()
@@ -566,6 +707,10 @@ async def main():
                           args=(get_logger("tx_conductor_native"),))
         scheduler.add_job(withdraw_handler, "interval", seconds=1, max_instances=1,
                           args=(get_logger("withdraw_handler"),))
+        scheduler.add_job(deposit_callback_handler, "interval", seconds=1, max_instances=1,
+                          args=(get_logger("deposit_callback_handler"),))
+        scheduler.add_job(withdrawal_callback_handler, "interval", seconds=1, max_instances=1,
+                          args=(get_logger("withdrawal_callback_handler"),))
 
         scheduler.start()
         while True:

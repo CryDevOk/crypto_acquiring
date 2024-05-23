@@ -5,10 +5,12 @@ import asyncio
 from db.database import DB, write_async_session, engine
 from db.models import Base
 from config import Config as Cfg
-from handler_api_client import Client
-from misc import startup_logger
+from api.handler_api_client import Client
+from misc import get_logger
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import text
+
+startup_logger = get_logger("proc_api_startup_logger")
 
 
 async def create_models():

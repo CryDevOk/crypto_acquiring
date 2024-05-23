@@ -1,10 +1,7 @@
 #!/usr/bin/python3
 # -*- coding: utf-8 -*-
 
-import routs
-from misc import app
-
-assert routs, "do not delete this import"
+from routs import app
 
 if __name__ == "__main__":
     import uvicorn

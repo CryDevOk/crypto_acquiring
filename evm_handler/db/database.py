@@ -354,7 +354,7 @@ class DB(object):
             await self.session.rollback()
             raise exc
 
-    async def get_and_lock_pending_deposits_coin(self, limit):
+    async def get_and_lock_pending_deposits_coin(self, limit, admin_balance_threshold:int):
         user = aliased(UserAddress)
         admin = aliased(UserAddress)
 
@@ -363,7 +363,7 @@ class DB(object):
                                    UserAddress.private.label('approve_private'),
                                    ).where(and_(
             Balances.coin_id == St.native.v,
-            Balances.balance >= Cfg.min_admin_address_native_balance
+            Balances.balance >= admin_balance_threshold
         )
         )
                             .join(Balances, Balances.address_id == UserAddress.id)

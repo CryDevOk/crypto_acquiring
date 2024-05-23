@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from sqlalchemy import and_
-from sqlalchemy.sql import select
+from sqlalchemy import and_, func, select, update, Column, Row
 
-from db.models import User, NetworkHandlers, Customer
+from db.models import User, NetworkHandlers, Customer, Callbacks
 from config import Config as Cfg
 
 
@@ -22,8 +21,16 @@ write_async_session = async_sessionmaker(engine, expire_on_commit=False, autoflu
 read_async_session = async_sessionmaker(read_engine, expire_on_commit=False, autoflush=False)
 
 
+def array_to_dict(columns: list[Column], values: Row[tuple[type]]):
+    resp = {}
+    if values:
+        for index, col in enumerate(columns):
+            resp[col.key] = values[index]
+    return resp
+
+
 class DB(object):
-    def __init__(self, session:AsyncSession, logger=None):
+    def __init__(self, session: AsyncSession, logger=None):
         self.session = session
         self.logger = logger
 
@@ -79,3 +86,68 @@ class DB(object):
         except Exception as e:
             await self.session.rollback()
             raise e
+
+    async def insert_callback(self, callback_id, user_id, path, json_data):
+        stmt = postgresql.insert(Callbacks).values({Callbacks.id.key: callback_id,
+                                                    Callbacks.user_id.key: user_id,
+                                                    Callbacks.path.key: path,
+                                                    Callbacks.json_data.key: json_data})
+        try:
+            await self.session.execute(stmt)
+            await self.session.commit()
+        except Exception as e:
+            await self.session.rollback()
+            raise e
+
+    async def get_and_lock_callbacks(self, limit):
+        subquery = (select(Callbacks.id.label('callback_id'),
+                           Callbacks.callback_period,
+                           Customer.callback_url,
+                           Customer.callback_api_key,
+                           Callbacks.path,
+                           Callbacks.json_data
+                           ).where(and_(Callbacks.is_notified == False,
+                                        Callbacks.locked_by_callback == False,
+                                        Callbacks.time_to_callback < func.NOW())
+                                   )
+                    .limit(limit).with_for_update(skip_locked=True)
+                    .join(User, User.id == Callbacks.user_id)
+                    .join(Customer, Customer.id == User.customer_id)
+                    )
+
+        columns = [subquery.c.callback_id,
+                   subquery.c.callback_period,
+                   subquery.c.callback_url,
+                   subquery.c.callback_api_key,
+                   subquery.c.path,
+                   subquery.c.json_data]
+
+        stmt = (
+            update(Callbacks)
+            .values(locked_by_callback=True)
+            .where(and_(
+                Callbacks.id == subquery.c.callback_id
+            ))
+            .returning(
+                *columns
+            )
+        )
+
+        try:
+            resp = await self.session.execute(stmt)
+            data = resp.fetchall()
+            await self.session.commit()
+            return [array_to_dict(columns, row) for row in data]
+        except Exception as exc:
+            await self.session.rollback()
+            raise exc
+
+    async def update_callback_by_id(self, callback_id, data, commit=False):
+        stmt = update(Callbacks).where(Callbacks.id == callback_id).values(data)
+        try:
+            await self.session.execute(stmt)
+            if commit:
+                await self.session.commit()
+        except Exception as exc:
+            await self.session.rollback()
+            raise exc

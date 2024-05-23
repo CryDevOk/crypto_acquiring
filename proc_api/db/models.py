@@ -1,13 +1,14 @@
 # -*- coding: utf-8 -*-
 from config import Config as Cfg
 
-from sqlalchemy import Column, Integer, String, true, Boolean, ForeignKey, text
+from sqlalchemy import Column, Integer, String, true, Boolean, ForeignKey, text, false, JSON, DateTime
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.types import TypeDecorator, LargeBinary
 from sqlalchemy.orm import relationship
 from Crypto.Cipher import AES
 from hashlib import sha256
 import os
+from datetime import datetime
 
 
 def aes_encrypt(data: str, key: bytes) -> bytes:
@@ -64,6 +65,23 @@ class User(Base):
 
     customer_id = Column(String(36), ForeignKey('customer.id', ondelete='SET NULL'), nullable=True, unique=False)
     customer = relationship("Customer", back_populates="user")
+
+    callbacks = relationship("Callbacks", back_populates="user", cascade="all, delete-orphan")
+
+
+class Callbacks(Base):
+    __tablename__ = 'callbacks'
+    id = Column(String(64), primary_key=True)
+    user_id = Column(String(36), ForeignKey('user.id', ondelete='CASCADE'), nullable=False, unique=False)
+    path = Column(String(255), nullable=False)
+    json_data = Column(JSON, nullable=False)
+    is_notified = Column(Boolean, nullable=False, server_default=false())
+
+    locked_by_callback = Column(Boolean, nullable=False, server_default=false())
+    time_to_callback = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.fromtimestamp(0))
+    callback_period = Column(Integer, nullable=False, default=60)
+
+    user = relationship("User", back_populates="callbacks")
 
 
 class NetworkHandlers(Base):

@@ -2,11 +2,11 @@
 
 !api
 !db
+!restapi
 !web3_client
+!before_start.py
 !config.py
+!entrypoint.sh
 !misc.py
 !tx_handler.py
-!entrypoint.sh
-!restapi
-!before_start.py
 

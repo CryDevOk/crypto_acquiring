@@ -7,6 +7,7 @@ from decimal import Decimal
 from typing import Dict
 
 from config import Config as Cfg
+import api
 
 
 def get_round_for_rate(rate: Decimal, quote_asset_precision=Decimal(0.01)) -> Decimal:
@@ -79,4 +80,4 @@ class SharedVariables:
 
 
 startup_logger = get_logger("startup_logger")
-
+proc_api_client = api.proc_api_client.Client(Cfg.PROC_URL, Cfg.PROC_API_KEY)
