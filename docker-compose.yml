@@ -5,6 +5,8 @@ services:
   httpbin:
     image: kennethreitz/httpbin
     container_name: httpbin
+    networks:
+      - acquiring
 
   postgres:
     image: postgres:16.1
