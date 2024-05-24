@@ -2,9 +2,11 @@ version: "3.5"
 
 
 services:
-  httpbin:
-    image: kennethreitz/httpbin
-    container_name: httpbin
+  echo-server:
+    image: ealen/echo-server
+    container_name: echo-server
+    environment:
+      - PORT=80
     networks:
       - acquiring
 
@@ -61,6 +63,19 @@ services:
       - acquiring
     volumes:
       - ./logs/eth_sepolia:/app/logs
+
+  tron_nile:
+    image: proc_tron:latest
+    container_name: tron_nile
+    env_file:
+      - .env_proc_tron_nile
+    command: [ "/bin/bash", "./entrypoint.sh" ]
+    restart: no
+    tty: true
+    networks:
+      - acquiring
+    volumes:
+      - ./logs/tron_nile:/app/logs
 
 networks:
   acquiring:

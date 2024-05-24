@@ -1,9 +1,10 @@
 docker build -f ./base_image_python/Dockerfile -t base_image:latest ./base_image_python
 docker build -f ./proc_api/Dockerfile -t proc_api:latest ./proc_api
 docker build -f ./evm_handler/Dockerfile -t proc_eth:latest ./evm_handler
+docker build -f ./tvm_handler/Dockerfile -t proc_tron:latest ./tvm_handler
 
 # Create DataBases
-docker-compose up -d httpbin
+docker-compose up -d echo-server
 docker-compose up -d postgres
 export PGPASSWORD=postgres
 wait_for_postgresql() {
@@ -24,9 +25,15 @@ psql -h localhost -U postgres -c \
     "CREATE DATABASE eth_sepolia WITH OWNER "postgres" ENCODING 'UTF8' LC_COLLATE = 'en_US.UTF-8' LC_CTYPE = 'en_US.UTF-8' TEMPLATE template0;"\
     2> /dev/null || echo "[INFO] Database eth_sepolia already exists"
 
+psql -h localhost -U postgres -c \
+    "CREATE DATABASE tron_nile WITH OWNER "postgres" ENCODING 'UTF8' LC_COLLATE = 'en_US.UTF-8' LC_CTYPE = 'en_US.UTF-8' TEMPLATE template0;"\
+    2> /dev/null || echo "[INFO] Database tron_nile already exists"
+
+
 psql -h localhost -U postgres -c '\list'
 
 # Deploy the services
+docker-compose up -d eth_sepolia
+docker-compose up -d tron_nile
 docker-compose up -d proc_api
-docker-compose up eth_sepolia
 
