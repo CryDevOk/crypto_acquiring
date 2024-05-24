@@ -10,7 +10,7 @@ customer = Customer()
 
 
 @pytest.mark.parametrize("input_data, expected_status_code, expected_response", [
-    ({"callback_url": "http://httpbin", "callback_api_key": "test"}, 200, {}),
+    ({"callback_url": "http://echo-server", "callback_api_key": "test"}, 200, {}),
     # ({"callback_url": "http://localhost", "callback_api_key": "test"}, 409, {}),
 ])
 def test_behavior(input_data, expected_status_code, expected_response):
