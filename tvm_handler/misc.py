@@ -76,7 +76,8 @@ class SharedVariables:
                                     (Cfg.tron_server, Cfg.tron_api_key3)] * 10)
         self.energy_price = 420
         self.coins_abi: Dict[str, Dict] = {}
-        self.estimated_native_fee = 3_000_000  # TODO parse it using blocks
+        self.estimated_trc20_fee = 30_000_000  # TODO parse it using blocks
+        self.estimated_native_fee = 3_000_000
 
 
 startup_logger = get_logger("startup_logger")

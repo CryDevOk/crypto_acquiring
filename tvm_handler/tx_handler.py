@@ -1,8 +1,15 @@
 # -*- coding: utf-8 -*-
 # Description: This module contains the main logic of the ERC20 parser and the native coin.
-
 from misc import get_logger, SharedVariables, amount_to_quote_amount, \
     get_round_for_rate, amount_to_display, proc_api_client
+from web3_client import utils as web3_utils
+from web3_client.async_client import MyAsyncTron, TRC20, BuildTransactionError, TransactionNotFound, TvmError, \
+    UnableToGetReceiptError, ApiError, BadSignature, TaposError, TransactionError, ValidationError
+from db.database import DB, write_async_session, read_async_session, Withdrawals
+from db.models import Deposits, Coins
+from config import Config as Cfg, StatCode as St
+import api
+
 import asyncio
 import logging
 from decimal import Decimal
@@ -11,11 +18,14 @@ from tronpy.abi import trx_abi
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from datetime import datetime, timedelta, timezone
 
-from web3_client import async_client, utils as web3_utils
-from db.database import DB, write_async_session, read_async_session, UserAddress, Withdrawals
-from db.models import Deposits, Coins
-from config import Config as Cfg, StatCode as St
-import api
+
+class PreparingTransactionError(Exception):
+    def __init__(self, original_error, message):
+        self.original_error = original_error
+        self.message = message
+
+    def __str__(self):
+        return f"Build transaction error: {self.message} {self.original_error}"
 
 
 async def coin_transfer_to_admin(
@@ -29,46 +39,27 @@ async def coin_transfer_to_admin(
         approve_private,
         deposit_id,
         amount,
-        tx_handler_period) -> tuple[None, Exception, tuple[type, type, type], type] | \
-                              tuple[type, None, tuple[type, type, type], type]:
+        tx_handler_period) -> tuple[None, Exception, tuple[type, type, type, type]] | \
+                              tuple[type, None, tuple[type, type, type, type]]:
     amount = int(amount)
-    async with async_client.MyAsyncTron(*conn_creds) as client:
-        contract = async_client.TRC20(client, contract_address, abi_info=web3_utils.trc20_abi)
-        try:
-            allowance = await contract.allowance(user_public, approve_public)
-        except Exception as exc:
-            return None, exc, (deposit_id, tx_handler_period, approve_id), conn_creds
-        else:
-            if allowance < amount:
-                try:
-                    await client.trx_transfer(user_public, 30_000_000, approve_private)
-                except Exception as exc:
-                    return None, exc, (deposit_id, tx_handler_period, approve_id), conn_creds
-                else:
-                    try:
-                        await contract.approve(approve_public, 9_999_999_999_999_999, user_private)
-                    except Exception as exc:
-                        return None, exc, (deposit_id, tx_handler_period, approve_id), conn_creds
-                    else:
-                        try:
-                            res = await contract.transfer_from(user_public,
-                                                               admin_public,
-                                                               amount,
-                                                               approve_private)
-                        except Exception as exc:
-                            return None, exc, (deposit_id, tx_handler_period, approve_id), conn_creds
-                        else:
-                            return res, None, (deposit_id, tx_handler_period, approve_id), conn_creds
+    try:
+        async with MyAsyncTron(*conn_creds) as client:
+            contract = TRC20(client, contract_address, abi_info=web3_utils.trc20_abi)
+            try:
+                allowance: int = await contract.allowance(user_public, approve_public)
+                if allowance < amount:
+                    balance = await contract._client.get_account_balance(user_public)
+                    if balance < variables.estimated_trc20_fee:
+                        await client.trx_transfer(user_public, variables.estimated_trc20_fee, approve_private)
+                    await contract.approve(approve_public, 9_999_999_999_999_999, user_private)
+            except Exception as exc:
+                raise PreparingTransactionError(exc, "Unable to prepare transaction")
             else:
-                try:
-                    res = await contract.transfer_from(user_public,
-                                                       admin_public,
-                                                       amount,
-                                                       approve_private)
-                except Exception as exc:
-                    return None, exc, (deposit_id, tx_handler_period, approve_id), conn_creds
-                else:
-                    return res, None, (deposit_id, tx_handler_period, approve_id), conn_creds
+                res = await contract.transfer_from(user_public, admin_public, amount, approve_private)
+    except Exception as exc:
+        return None, exc, (conn_creds, deposit_id, tx_handler_period, approve_id)
+    else:
+        return res, None, (conn_creds, deposit_id, tx_handler_period, approve_id)
 
 
 async def withdraw_coin(conn_creds,
@@ -80,16 +71,17 @@ async def withdraw_coin(conn_creds,
                         tx_handler_period,
                         admin_addr_id,
                         **_
-                        ):
+                        ) -> tuple[None, Exception, tuple[type, type, type, type]] | \
+                             tuple[type, None, tuple[type, type, type, type]]:
     amount = int(amount)
     try:
-        async with async_client.MyAsyncTron(*conn_creds) as client:
-            contract = async_client.TRC20(client, contract_address, abi_info=web3_utils.trc20_abi)
+        async with MyAsyncTron(*conn_creds) as client:
+            contract = TRC20(client, contract_address, abi_info=web3_utils.trc20_abi)
             res = await contract.transfer(withdrawal_address, amount, admin_private)
     except Exception as exc:
-        return None, exc, (withdrawal_id, tx_handler_period, admin_addr_id), conn_creds
+        return None, exc, (conn_creds, withdrawal_id, tx_handler_period, admin_addr_id)
     else:
-        return res, None, (withdrawal_id, tx_handler_period, admin_addr_id), conn_creds
+        return res, None, (conn_creds, withdrawal_id, tx_handler_period, admin_addr_id)
 
 
 async def withdraw_native(conn_creds,
@@ -103,12 +95,12 @@ async def withdraw_native(conn_creds,
                           ):
     amount = int(amount)
     try:
-        async with async_client.MyAsyncTron(*conn_creds) as client:
+        async with MyAsyncTron(*conn_creds) as client:
             res = await client.trx_transfer(withdrawal_address, amount, admin_private)
     except Exception as exc:
-        return None, exc, (withdrawal_id, tx_handler_period, admin_addr_id), conn_creds
+        return None, exc, (conn_creds, withdrawal_id, tx_handler_period, admin_addr_id)
     else:
-        return res, None, (withdrawal_id, tx_handler_period, admin_addr_id), conn_creds
+        return res, None, (conn_creds, withdrawal_id, tx_handler_period, admin_addr_id)
 
 
 async def notify_deposit(display_amount: str,
@@ -118,7 +110,7 @@ async def notify_deposit(display_amount: str,
                          tx_hash_in: str,
                          user_id,
                          coin_name,
-                         **_):
+                         **_) -> tuple[Exception, tuple[type, int, type]] | tuple[None, tuple[type, int, type]]:
     callback_id = f"deposit_{deposit_id}"
     path = "/v1/api/private/user/deposit"
     json_data = {"user_id": user_id,
@@ -167,25 +159,28 @@ async def notify_withdrawal(display_amount: str,
         return resp, None, (withdrawal_id, callback_period)
 
 
-async def native_balance(conn_creds, addr_id, address):
+async def native_balance(conn_creds, addr_id, address) -> tuple[int, None, tuple[type, type, type]] | \
+                                                          tuple[None, Exception, tuple[type, type, type]]:
     try:
-        async with async_client.MyAsyncTron(*conn_creds) as client:
+        async with MyAsyncTron(*conn_creds) as client:
             res: int = await client.get_account_balance(address)
     except Exception as exc:
-        return None, exc, (addr_id, address, conn_creds)
+        return None, exc, (conn_creds, addr_id, address)
     else:
-        return res, None, (addr_id, address, conn_creds)
+        return res, None, (conn_creds, addr_id, address)
 
 
-async def trc20_balance(conn_creds, addr_id, contract_address, address: str):
+async def trc20_balance(conn_creds, addr_id, contract_address, address: str) \
+        -> tuple[int, None, tuple[type, type, type]] | \
+           tuple[None, Exception, tuple[type, type, type]]:
     try:
-        async with async_client.MyAsyncTron(*conn_creds) as client:
-            contract = async_client.TRC20(client, contract_address, abi_info=web3_utils.trc20_abi)
-            res = await contract.balance_of(address)
+        async with MyAsyncTron(*conn_creds) as client:
+            contract = TRC20(client, contract_address, abi_info=web3_utils.trc20_abi)
+            res: int = await contract.balance_of(address)
     except Exception as exc:
-        return None, exc, (addr_id, contract_address, conn_creds)
+        return None, exc, (conn_creds, addr_id, contract_address)
     else:
-        return res, None, (addr_id, contract_address, conn_creds)
+        return res, None, (conn_creds, addr_id, contract_address)
 
 
 async def admin_approve_native_bal(logger):
@@ -202,10 +197,10 @@ async def admin_approve_native_bal(logger):
             results = await asyncio.gather(*reqs)
 
             for balance, err, req_ident in results:
-                addr_id, address, conn_creds = req_ident
+                conn_creds, addr_id, address = req_ident
                 await variables.api_keys_pool.put(conn_creds)
                 if not err:
-                    if balance <= variables.estimated_native_fee * Cfg.native_warning_threshold:
+                    if balance <= variables.estimated_trc20_fee * Cfg.native_warning_threshold:
                         logger.warning(
                             f"{addr_id} {address}: has balance {amount_to_display(balance, 6, Decimal('0.01'))} "
                             f"and can handle less then {Cfg.native_warning_threshold} transactions")
@@ -235,7 +230,7 @@ async def admin_coins_bal(logger):
             results = await asyncio.gather(*reqs)
 
             for balance, err, req_ident in results:
-                addr_id, contract_address, conn_creds = req_ident
+                conn_creds, addr_id, contract_address = req_ident
                 await variables.api_keys_pool.put(conn_creds)
                 if not err:
                     await db.upsert_balance(addr_id, contract_address, balance, commit=True)
@@ -251,7 +246,7 @@ async def update_in_memory_last_handled_block(logger: logging.Logger):
             if not block:
                 if Cfg.start_block == "latest":
                     conn_creds: list[tuple[str, str]] = await variables.api_keys_pool.get()
-                    async with async_client.MyAsyncTron(*conn_creds) as client:
+                    async with MyAsyncTron(*conn_creds) as client:
                         block = await client.latest_block_number() - Cfg.block_offset
                         await db.insert_last_handled_block(block, commit=True)
                     await variables.api_keys_pool.put(conn_creds)
@@ -381,7 +376,7 @@ async def native_txs_parser(block: dict, native_coin: dict, logger: logging.Logg
 
 
 async def block_parser(conn_creds_1, conn_creds_2, logger: logging.Logger):
-    async with async_client.MyAsyncTron(*conn_creds_1) as client1, async_client.MyAsyncTron(*conn_creds_2) as client2:
+    async with MyAsyncTron(*conn_creds_1) as client1, MyAsyncTron(*conn_creds_2) as client2:
         try:
             latest_trust_block = await client1.latest_block_number() - Cfg.block_offset
         except Exception as exc:
@@ -425,6 +420,15 @@ async def block_parser(conn_creds_1, conn_creds_2, logger: logging.Logger):
                         logger.info(f"handled block number {current_block}")
 
 
+async def postpone_deposit_handling(db, deposit_id, tx_handler_period):
+    time_to_tx_handler = datetime.now(timezone.utc) + timedelta(seconds=tx_handler_period)
+    tx_handler_period += 30
+    await db.update_deposit_by_id(deposit_id, {Deposits.locked_by_tx_handler.key: False,
+                                               Deposits.time_to_tx_handler.key: time_to_tx_handler,
+                                               Deposits.tx_handler_period.key: tx_handler_period},
+                                  commit=True)
+
+
 async def tx_conductor_native(logger: logging.Logger):
     reqs = []
     async with write_async_session() as session:
@@ -438,23 +442,22 @@ async def tx_conductor_native(logger: logging.Logger):
 
             results = await asyncio.gather(*reqs)
 
-            for tx_hash, err, req_ident, conn_creds in results:
+            for tx_hash, err, req_ident in results:
+                conn_creds, deposit_id, tx_handler_period = req_ident
                 await variables.api_keys_pool.put(conn_creds)
-                deposit_id, tx_handler_period = req_ident
                 if not err:
                     await db.update_deposit_by_id(deposit_id, {Deposits.tx_hash_out.key: tx_hash,
                                                                Deposits.locked_by_tx_handler.key: False}, commit=True)
-                elif tx_hash:
-                    logger.critical(f"{err} deposit_id: {deposit_id}, {tx_hash}")
-                    await db.update_deposit_by_id(deposit_id, {Deposits.tx_hash_out.key: tx_hash}, commit=True)
-                else:
-                    logger.error(f"{err} deposit_id: {deposit_id}")
-                    time_to_tx_handler = datetime.now(timezone.utc) + timedelta(seconds=tx_handler_period)
-                    tx_handler_period += 30
-                    await db.update_deposit_by_id(deposit_id, {Deposits.locked_by_tx_handler.key: False,
-                                                               Deposits.time_to_tx_handler.key: time_to_tx_handler,
-                                                               Deposits.tx_handler_period.key: tx_handler_period},
-                                                  commit=True)
+                else:  # exception handling
+                    if isinstance(err, (BuildTransactionError, TransactionNotFound, TvmError, ApiError,
+                                        BadSignature, TaposError, TransactionError, ValidationError)):
+                        logger.error(f"{err} deposit_id: {deposit_id}")
+                        await postpone_deposit_handling(db, deposit_id, tx_handler_period)
+                    else:
+                        if isinstance(err, UnableToGetReceiptError):
+                            logger.critical(f"{err} deposit_id: {deposit_id}")
+                        else:
+                            logger.critical(f"Unexpected error {err} deposit_id: {deposit_id}")
 
 
 async def native_transfer_to_admin(conn_creds,
@@ -462,23 +465,24 @@ async def native_transfer_to_admin(conn_creds,
                                    amount,
                                    user_private,
                                    admin_public,
-                                   tx_handler_period):
+                                   tx_handler_period) -> tuple[None, Exception, tuple[type, type, type]] | \
+                                                         tuple[type, None, tuple[type, type, type]]:
     amount = int(amount)
+    amount_with_fee: int = amount - variables.estimated_native_fee
     try:
-        async with async_client.MyAsyncTron(*conn_creds) as client:
-            amount_with_fee: int = amount - variables.estimated_native_fee
+        async with MyAsyncTron(*conn_creds) as client:
             res = await client.trx_transfer(admin_public, amount_with_fee, user_private)
     except Exception as exc:
-        return None, exc, (deposit_id, tx_handler_period), conn_creds
+        return None, exc, (conn_creds, deposit_id, tx_handler_period)
     else:
-        return res, None, (deposit_id, tx_handler_period), conn_creds
+        return res, None, (conn_creds, deposit_id, tx_handler_period)
 
 
 async def tx_conductor_coin(logger: logging.Logger):
     reqs = []
     async with write_async_session() as session:
         db = DB(session, logger)
-        deposits = await db.get_and_lock_pending_deposits_coin(5, variables.estimated_native_fee)
+        deposits = await db.get_and_lock_pending_deposits_coin(5, variables.estimated_trc20_fee)
 
         if deposits:
             for deposit in deposits:
@@ -487,25 +491,23 @@ async def tx_conductor_coin(logger: logging.Logger):
 
             results = await asyncio.gather(*reqs)
 
-            for tx_hash, err, req_ident, conn_creds in results:
+            for tx_hash, err, req_ident in results:
+                conn_creds, deposit_id, tx_handler_period, approve_id = req_ident
                 await variables.api_keys_pool.put(conn_creds)
-                deposit_id, tx_handler_period, approve_id = req_ident
                 if not err:
                     await db.update_deposit_by_id(deposit_id, {Deposits.tx_hash_out.key: tx_hash,
                                                                Deposits.locked_by_tx_handler.key: False}, commit=True)
-                elif tx_hash and err:
-                    logger.critical(f"{err} deposit_id: {deposit_id}, {tx_hash}")
-                    await db.update_deposit_by_id(deposit_id, {Deposits.tx_hash_out.key: tx_hash})
-                    await db.update_user_address_by_id(approve_id, {UserAddress.locked_by_tx.key: False},
-                                                       commit=True)
-                else:
-                    logger.error(f"{err} deposit_id: {deposit_id}")
-                    time_to_tx_handler = datetime.now(timezone.utc) + timedelta(seconds=tx_handler_period)
-                    tx_handler_period += 30
-                    await db.update_deposit_by_id(deposit_id, {Deposits.locked_by_tx_handler.key: False,
-                                                               Deposits.time_to_tx_handler.key: time_to_tx_handler,
-                                                               Deposits.tx_handler_period.key: tx_handler_period},
-                                                  commit=True)
+                else:  # exception handling
+                    if isinstance(err, (PreparingTransactionError, BuildTransactionError,
+                                        TransactionNotFound, TvmError, ApiError,
+                                        BadSignature, TaposError, TransactionError, ValidationError)):
+                        logger.error(f"deposit_id: {deposit_id} {err}")
+                        await postpone_deposit_handling(db, deposit_id, tx_handler_period)
+                    else:
+                        if isinstance(err, UnableToGetReceiptError):
+                            logger.critical(f"deposit_id: {deposit_id} {err}")
+                        else:
+                            logger.critical(f"Unexpected error {err} deposit_id: {deposit_id}")
 
 
 async def withdraw_handler(logger: logging.Logger):
@@ -525,24 +527,27 @@ async def withdraw_handler(logger: logging.Logger):
 
             results = await asyncio.gather(*reqs)
 
-            for tx_hash, err, req_ident, conn_creds in results:
+            for tx_hash, err, req_ident in results:
+                conn_creds, withdrawal_id, tx_handler_period, adm_address_id = req_ident
                 await variables.api_keys_pool.put(conn_creds)
-                withdrawal_id, tx_handler_period, adm_address_id = req_ident
                 if not err:
                     await db.update_withdrawal_by_id(withdrawal_id, {Withdrawals.tx_hash_out.key: tx_hash}, commit=True)
-                elif tx_hash:
-                    logger.critical(f"{err} withdrawal_id: {withdrawal_id}")
-                    await db.update_withdrawal_by_id(withdrawal_id, {Withdrawals.tx_hash_out.key: tx_hash})
-                    await db.update_user_address_by_id(adm_address_id, {UserAddress.locked_by_tx.key: False},
-                                                       commit=True)
                 else:
-                    time_to_tx_handler = datetime.now(timezone.utc) + timedelta(tx_handler_period)
-                    tx_handler_period += 15
-                    await db.update_withdrawal_by_id(
-                        withdrawal_id, {Withdrawals.admin_addr_id.key: None,
-                                        Withdrawals.time_to_tx_handler.key: time_to_tx_handler,
-                                        Withdrawals.tx_handler_period.key: tx_handler_period}, commit=True)
-                    logger.error(f"{err} withdrawal_id: {withdrawal_id}")
+                    if isinstance(err, (BuildTransactionError, TransactionNotFound,
+                                        TvmError, ApiError, BadSignature, TaposError, TransactionError,
+                                        ValidationError)):
+                        logger.error(f"withdrawal_id: {withdrawal_id} {err}")
+                        time_to_tx_handler = datetime.now(timezone.utc) + timedelta(tx_handler_period)
+                        tx_handler_period += 15
+                        await db.update_withdrawal_by_id(
+                            withdrawal_id, {Withdrawals.admin_addr_id.key: None,
+                                            Withdrawals.time_to_tx_handler.key: time_to_tx_handler,
+                                            Withdrawals.tx_handler_period.key: tx_handler_period}, commit=True)
+                    else:
+                        if isinstance(err, UnableToGetReceiptError):
+                            logger.critical(f"withdrawal_id: {withdrawal_id} {err}")
+                        else:
+                            logger.critical(f"Unexpected error {err} withdrawal_id: {withdrawal_id}")
 
 
 async def deposit_callback_handler(logger: logging.Logger):
@@ -654,7 +659,7 @@ async def main():
                           args=(get_logger("admin_coins_bal"),))
         scheduler.add_job(admin_approve_native_bal, "interval", seconds=30,
                           args=(get_logger("admin_approve_native_bal"),))
-        scheduler.add_job(block_parser, "interval", seconds=3, max_instances=1,
+        scheduler.add_job(block_parser, "interval", seconds=1, max_instances=1,
                           args=(reserved_conn_creds1, reserved_conn_creds2, get_logger("block_parser")))
         scheduler.add_job(tx_conductor_coin, "interval", seconds=1, max_instances=1,
                           args=(get_logger("tx_conductor_coin"),))

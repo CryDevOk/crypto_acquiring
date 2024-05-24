@@ -1,10 +1,12 @@
+# -*- coding: utf-8 -*-
 from tronpy.async_tron import AsyncTron, AsyncTrx, AsyncContract, DEFAULT_CONF, AsyncTransactionRet
 from tronpy.providers.async_http import AsyncHTTPProvider
 from tronpy.keys import PrivateKey, keccak256
-from tronpy.abi import trx_abi
+from tronpy.abi import trx_abi, tron_abi
 from httpx import _exceptions as httpx_exc
 import time
 import asyncio
+from urllib.parse import urljoin
 from tronpy.exceptions import (
     AddressNotFound,
     ApiError,
@@ -34,7 +36,23 @@ class EstimatedEnergyError(Exception):
     pass
 
 
-from urllib.parse import urljoin
+class UnableToGetReceiptError(Exception):
+    def __init__(self, original_error, tx_hash, message):
+        self.original_error = original_error
+        self.tx_hash = tx_hash
+        self.message = message
+
+    def __str__(self):
+        return f"Unable to get receipt for transaction {self.tx_hash}: {self.message} {self.original_error}"
+
+
+class BuildTransactionError(Exception):
+    def __init__(self, original_error, message):
+        self.original_error = original_error
+        self.message = message
+
+    def __str__(self):
+        return f"Build transaction error: {self.message} {self.original_error}"
 
 
 class MyAsyncHTTPProvider(AsyncHTTPProvider):
@@ -71,13 +89,18 @@ class MyAsyncTransactionRet(AsyncTransactionRet):
             get_transaction_info = self._client.get_solid_transaction_info
 
         end_time = time.time() + timeout
+        exception = None
         while time.time() < end_time:
             try:
                 return await get_transaction_info(self._txid)
-            except (TransactionNotFound, httpx_exc.HTTPError):
+            except (TransactionNotFound, httpx_exc.HTTPError) as exc:
+                exception = exc
                 await asyncio.sleep(interval)
 
-        raise TransactionNotFound("timeout and can not find the transaction")
+        if isinstance(exception, httpx_exc.HTTPError):  # this can happen if the node is down
+            raise UnableToGetReceiptError(exception, self._txid, "Failed to get transaction receipt")
+        else:
+            raise exception
 
 
 class MyAsyncTron(AsyncTron):
@@ -101,20 +124,29 @@ class MyAsyncTron(AsyncTron):
         self.provider = MyAsyncHTTPProvider(self.server, api_key=self.api_key)
         return self
 
-    async def broadcast_and_wait_result(self, txn):
+    async def broadcast_and_wait_result(self, txn) -> str:
         try:
             await self.broadcast(txn)
         except httpx_exc.HTTPError:
             pass
         txn_ret = MyAsyncTransactionRet({"txid": txn.txid}, client=self, method=txn._method)
-        return await txn_ret.result()
+        if txn._method:
+            await txn_ret.result()
+            return txn_ret._txid
+        else:
+            await txn_ret.wait()
+            return txn_ret._txid
 
     async def trx_transfer(self, to_, amount, signer_key, fee_limit=1000):
-        signer_account = Account(bytes.fromhex(signer_key))
-        txb = self.trx.transfer(signer_account.address, to_, amount).fee_limit(fee_limit)
-        txn = await txb.build()
-        txn = txn.sign(signer_account)
-        return await self.broadcast_and_wait_result(txn)
+        try:
+            signer_account = Account(bytes.fromhex(signer_key))
+            txb = self.trx.transfer(signer_account.address, to_, amount).fee_limit(fee_limit)
+            txn = await txb.build()
+            txn = txn.sign(signer_account)
+        except Exception as e:
+            raise BuildTransactionError(e, f"Failed to build transaction: {e}")
+        else:
+            return await self.broadcast_and_wait_result(txn)
 
     async def get_account_balance(self, addr) -> int:
         try:
@@ -216,7 +248,7 @@ class TRC20(MyAsyncContract):
     async def allowance(self, owner, spender):
         return await self.call_contract("allowance", (owner, spender))
 
-    async def balance_of(self, address) -> tuple:
+    async def balance_of(self, address):
         return await self.call_contract("balanceOf", (address,))
 
 
@@ -239,7 +271,7 @@ async def distribute_trc20(client: MyAsyncTron,
 
 async def prepare_new_accounts():
     address_count: int = 4
-    trx_amount = 0.1
+    trx_amount = 100
     wei_amount = int(trx_amount * 10 ** 6)
     coin_amount = 20_000_000
     priv_key = ""
