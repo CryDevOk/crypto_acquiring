@@ -2,6 +2,9 @@ import tronpy
 from tronpy.keys import PrivateKey, to_base58check_address
 import mnemonic
 import base58
+from datetime import datetime, timedelta
+import pandas as pd
+import asyncio
 
 trc20_abi = {"abi": {"entrys": [
     {'outputs': [{'type': 'bool'}],
@@ -63,3 +66,58 @@ def keys_from_mnemonic(mnemonic, amount, offset=0) -> list[PrivateKey]:
 def to_hex_address(raw_addr: str | bytes) -> str:
     addr = to_base58check_address(raw_addr)
     return base58.b58decode_check(addr).hex()
+
+
+class TronRequestExplorer:
+    def __init__(self, clean_time_frame: timedelta = timedelta(hours=24)):
+        self.df = pd.DataFrame(columns=['timestamp', 'http_code'])
+        self.clean_time_frame = clean_time_frame
+        self.lock = asyncio.Lock()
+
+    async def add_request(self, request_http_code):
+        async with self.lock:
+            new_row = pd.DataFrame({'timestamp': [datetime.now()], 'http_code': [request_http_code]})
+            if self.df.empty:
+                self.df = new_row
+            else:
+                self.df = pd.concat(
+                    [self.df, new_row],
+                    ignore_index=True)
+
+    async def clean_old_requests(self):
+        async with self.lock:
+            current_time = datetime.now()
+            cutoff_time = current_time - self.clean_time_frame
+            self.df = self.df[self.df['timestamp'] >= cutoff_time]
+
+    async def count_requests(self, time_frame: timedelta):
+        async with self.lock:
+            cutoff_time = datetime.now() - time_frame
+            request_count = self.df[self.df['timestamp'] >= cutoff_time].shape[0]
+        return request_count
+
+    async def share_unsuccessful_requests(self, time_frame: timedelta):
+        async with self.lock:
+            cutoff_time = datetime.now() - time_frame
+            all_requests = self.df[self.df['timestamp'] >= cutoff_time].shape[0]
+            unsuccessful_requests = \
+                self.df[(self.df['timestamp'] >= cutoff_time) & (self.df['http_code'] != 200)].shape[0]
+        return unsuccessful_requests / all_requests if all_requests > 0 else 0
+
+    async def description_by_status_code(self, time_frame: timedelta):
+        async with self.lock:
+            cutoff_time = datetime.now() - time_frame
+            all_requests = self.df[self.df['timestamp'] >= cutoff_time].shape[0]
+            status_codes = self.df[self.df['timestamp'] >= cutoff_time]['http_code'].value_counts()
+        message = f"Total requests: {all_requests}\n"
+        for code, count in status_codes.items():
+            message += f"Status code {code}: {count} ({count / all_requests:.2%})\n"
+        return message
+
+    async def rps(self, time_frame: timedelta):
+        async with self.lock:
+            total_seconds = time_frame.total_seconds()
+            cutoff_time = datetime.now() - time_frame
+            request_count = self.df[self.df['timestamp'] >= cutoff_time].shape[0]
+            outgoing_requests_per_second = request_count / total_seconds if total_seconds > 0 else 0
+        return outgoing_requests_per_second
