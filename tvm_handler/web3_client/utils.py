@@ -6,6 +6,14 @@ from datetime import datetime, timedelta
 import pandas as pd
 import asyncio
 
+import hashlib
+import base64
+import binascii
+import copy
+
+from google.protobuf.json_format import ParseDict
+from trontxsize.tron_pb2 import Transaction
+
 trc20_abi = {"abi": {"entrys": [
     {'outputs': [{'type': 'bool'}],
      'inputs': [{'name': '_to', 'type': 'address'},
@@ -121,3 +129,58 @@ class TronRequestExplorer:
             request_count = self.df[self.df['timestamp'] >= cutoff_time].shape[0]
             outgoing_requests_per_second = request_count / total_seconds if total_seconds > 0 else 0
         return outgoing_requests_per_second
+
+
+BYTES_DIFF_PROTOBUF = 64  # difference we always get between java and python protobuf for some reason
+
+
+def normalize_string(v):
+    return base64.b64encode(v.encode())
+
+
+def normalize_string2(v):
+    return base64.b64encode(binascii.unhexlify(v))
+
+
+def raw_data_to_pbf_tx(tx: dict) -> int:
+    data = copy.deepcopy(tx)
+    raw_data = data["raw_data"]
+    raw_contracts = raw_data["contract"]
+    contracts = []
+
+    for contract in raw_contracts:
+        parameter = contract["parameter"]
+        for key, value in parameter["value"].items():
+            if isinstance(value, str):
+                if key.endswith("address") and value[0] == "T":
+                    parameter["value"][key] = base58.b58decode_check(parameter["value"][key]).hex()
+                if key != "asset_name":
+                    parameter["value"][key] = normalize_string2(parameter["value"][key])
+                else:
+                    parameter["value"][key] = normalize_string(parameter["value"][key])
+        parameter.update(parameter.pop("value", {}))
+        parameter["@type"] = parameter.pop("type_url", None)
+        contracts.append(contract)
+
+    raw_data["contract"] = contracts
+
+    for key in ("data", "ref_block_bytes", "ref_block_hash"):
+        if key in data["raw_data"]:
+            data["raw_data"][key] = normalize_string2(data["raw_data"][key])
+
+    return ParseDict(data, Transaction())
+
+
+def calculate_tx_id(raw_data: dict) -> str:
+    """
+    Get the transaction id of the raw data.
+    :param raw_data:
+    :return:
+    """
+    pbtx = raw_data_to_pbf_tx({"raw_data": raw_data, "signature": []})
+    msg_bytes = pbtx.raw_data.SerializeToString()
+    return hashlib.sha256(msg_bytes).hexdigest()
+
+
+def get_tx_size(transaction) -> int:
+    return transaction.ByteSize() + BYTES_DIFF_PROTOBUF

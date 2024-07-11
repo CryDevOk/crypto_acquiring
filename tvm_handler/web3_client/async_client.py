@@ -1,12 +1,11 @@
 # -*- coding: utf-8 -*-
-from tronpy.async_tron import AsyncTron, AsyncTrx, AsyncContract, DEFAULT_CONF, AsyncTransactionRet
-from tronpy.providers.async_http import AsyncHTTPProvider
+from tronpy.async_tron import AsyncTron, AsyncTrx, AsyncContract, DEFAULT_CONF, AsyncTransactionRet, AsyncTransaction, \
+    AsyncTransactionBuilder, AsyncContractMethod
 from tronpy.keys import PrivateKey, keccak256
-from tronpy.abi import trx_abi, tron_abi
-from httpx import _exceptions as httpx_exc
+from tronpy.abi import trx_abi
+import httpx
 import time
 import asyncio
-from urllib.parse import urljoin
 from tronpy.exceptions import (
     AddressNotFound,
     ApiError,
@@ -25,7 +24,7 @@ from tronpy.exceptions import (
     BadAddress
 )
 
-from web3_client.utils import generate_mnemonic, keys_from_mnemonic, trc20_abi
+from web3_client.utils import generate_mnemonic, keys_from_mnemonic, trc20_abi, TronRequestExplorer, calculate_tx_id
 
 
 class BalanceError(Exception):
@@ -53,14 +52,6 @@ class BuildTransactionError(Exception):
 
     def __str__(self):
         return f"Build transaction error: {self.message} {self.original_error}"
-
-
-class MyAsyncHTTPProvider(AsyncHTTPProvider):
-    async def http_api_request(self, method, path, **kwargs):
-        url = urljoin(self.endpoint_uri, path)
-        resp = await self.client.request(method, url, **kwargs)
-        resp.raise_for_status()
-        return resp.json()
 
 
 class Account(PrivateKey):
@@ -93,20 +84,53 @@ class MyAsyncTransactionRet(AsyncTransactionRet):
         while time.time() < end_time:
             try:
                 return await get_transaction_info(self._txid)
-            except (TransactionNotFound, httpx_exc.HTTPError) as exc:
+            except (TransactionNotFound, httpx.HTTPError) as exc:
                 exception = exc
                 await asyncio.sleep(interval)
 
-        if isinstance(exception, httpx_exc.HTTPError):  # this can happen if the node is down
+        if isinstance(exception, httpx.HTTPError):  # this can happen if the node is down
             raise UnableToGetReceiptError(exception, self._txid, "Failed to get transaction receipt")
         else:
             raise exception
 
 
+class MyAsyncTransaction(AsyncTransaction):
+    @classmethod
+    async def create(cls, *args, **kwargs) -> "MyAsyncTransaction":
+        return cls(*args, **kwargs)
+
+
+class MyAsyncTransactionBuilder(AsyncTransactionBuilder):
+    async def build(self, options=None, **kwargs) -> MyAsyncTransaction:
+        """Build the transaction."""
+        ref_block_id = await self._client.get_latest_solid_block_id()
+        # last 2 byte of block number part
+        self._raw_data["ref_block_bytes"] = ref_block_id[12:16]
+        # last half part of block hash
+        self._raw_data["ref_block_hash"] = ref_block_id[16:32]
+
+        tx_id = calculate_tx_id(self._raw_data)
+
+        if self._method:
+            return await MyAsyncTransaction.create(self._raw_data, client=self._client, txid=tx_id, method=self._method)
+        else:
+            return await MyAsyncTransaction.create(self._raw_data, client=self._client, txid=tx_id)
+
+
+class MyAsyncTrx(AsyncTrx):
+    def _build_transaction(self, type_: str, obj: dict, *,
+                           method: "AsyncContractMethod" = None) -> MyAsyncTransactionBuilder:
+        inner = {
+            "parameter": {"value": obj, "type_url": f"type.googleapis.com/protocol.{type_}"},
+            "type": type_,
+        }
+        if method:
+            return MyAsyncTransactionBuilder(inner, client=self.client, method=method)
+        return MyAsyncTransactionBuilder(inner, client=self.client)
+
+
 class MyAsyncTron(AsyncTron):
-    def __init__(self, server: str, api_key: str, conf: dict = None):
-        self.server = server
-        self.api_key = api_key
+    def __init__(self, provider: callable, provider_args: dict = None, conf: dict = None):
         self.client = None
 
         self.conf = DEFAULT_CONF
@@ -115,19 +139,19 @@ class MyAsyncTron(AsyncTron):
         if conf is not None:
             self.conf = dict(DEFAULT_CONF, **conf)
 
-        self.provider = None
-        self._trx = AsyncTrx(self)
+        self.provider = provider(**(provider_args or {}))
+        self._trx = MyAsyncTrx(self)
 
         super(MyAsyncTron).__init__()
 
-    async def __aenter__(self):
-        self.provider = MyAsyncHTTPProvider(self.server, api_key=self.api_key)
-        return self
+    async def broadcast_hex(self, hex_str: MyAsyncTransaction) -> dict:
+        """Broadcast a hex string."""
+        return await self.provider.make_request("wallet/broadcasthex", {"transaction": hex_str})
 
     async def broadcast_and_wait_result(self, txn) -> str:
         try:
             await self.broadcast(txn)
-        except httpx_exc.HTTPError:
+        except httpx.HTTPError:
             pass
         txn_ret = MyAsyncTransactionRet({"txid": txn.txid}, client=self, method=txn._method)
         if txn._method:
@@ -156,9 +180,13 @@ class MyAsyncTron(AsyncTron):
         else:
             return info.get("balance", 0)
 
-    async def latest_block_number(self) -> str:
-        data = await self.provider.http_api_request("post", "walletsolidity/getblock")
-        return data["block_header"]["raw_data"]["number"]
+    async def latest_block_number(self) -> int:
+        data = await self.provider.http_api_request("post", "jsonrpc", json={
+            "id": 1,
+            "jsonrpc": "2.0",
+            "method": "eth_blockNumber"
+        })
+        return int(data["result"], 16)
 
     async def get_entire_block(self, block_num):
         return await self.provider.http_api_request("post", "wallet/getblockbynum",
@@ -252,7 +280,10 @@ class TRC20(MyAsyncContract):
         return await self.call_contract("balanceOf", (address,))
 
 
-async def distribute_trx(client: MyAsyncTron, accounts: list[PrivateKey], amount: int, priv_key: str):
+async def distribute_trx(client: MyAsyncTron,
+                         accounts: list[PrivateKey],
+                         amount: int,
+                         priv_key: str):
     for account in accounts:
         resp = await client.trx_transfer(account.public_key.to_base58check_address(), amount, priv_key)
         print(resp)
@@ -270,19 +301,26 @@ async def distribute_trc20(client: MyAsyncTron,
 
 
 async def prepare_new_accounts():
+    import web3_client.providers as providers
     address_count: int = 4
-    trx_amount = 100
+    trx_amount = 1
     wei_amount = int(trx_amount * 10 ** 6)
-    coin_amount = 20_000_000
+    coin_amount = 20
     priv_key = ""
     contract_address = ""
-    provider_url = ""
-    api_key = ""
+
+    # conn_creds = (providers.AsyncZanHTTPProvider,
+    #               {"endpoint_uri": "https://api.zan.top/node/v1/tron/nile",
+    #                "api_key": ""})
+
+    conn_creds = (providers.AsyncTronGridHTTPProvider,
+                  {"endpoint_uri": "https://nile.trongrid.io",
+                   "api_key": ""})
 
     mnem = generate_mnemonic()
     print(mnem)
     accounts = keys_from_mnemonic(mnem, address_count)
-    async with MyAsyncTron(provider_url, api_key) as client:
+    async with MyAsyncTron(*conn_creds) as client:
         await distribute_trx(client, accounts, wei_amount, priv_key)
         await distribute_trc20(client, accounts, coin_amount, priv_key, contract_address)
 
