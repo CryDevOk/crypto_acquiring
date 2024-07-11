@@ -56,10 +56,22 @@ class Config(object):
     READ_DSN = os.environ.get("PROC_HANDLER_READ_DSN")
     DB_SECRET_KEY = os.environ.get("PROC_HANDLER_DB_SECRET_KEY").encode()
 
-    tron_api_key = os.environ.get("PROC_HANDLER_TRONGRID_API_KEY_1")
-    tron_api_key2 = os.environ.get("PROC_HANDLER_TRONGRID_API_KEY_2")
-    tron_api_key3 = os.environ.get("PROC_HANDLER_TRONGRID_API_KEY_3")
-    tron_server = os.environ.get("PROC_HANDLER_PROVIDER_URL")
+    trongrid_server = os.environ.get("PROC_HANDLER_PROVIDER_TRONGRID_URL")
+    trongrid_api_keys = os.environ.get("PROC_HANDLER_TRONGRID_API_KEYS")
+    if trongrid_api_keys:
+        trongrid_api_keys = trongrid_api_keys.split(",")
+        assert trongrid_server, "PROC_HANDLER_PROVIDER_TRONGRID_URL must be set if PROC_HANDLER_TRONGRID_API_KEYS has been set"
+    else:
+        trongrid_api_keys = []
+
+    zan_server = os.environ.get("PROC_HANDLER_PROVIDER_ZAN_URL")
+    zan_api_key_keys = os.environ.get("PROC_HANDLER_ZAN_API_KEYS")
+    if zan_api_key_keys:
+        zan_api_key_keys = zan_api_key_keys.split(",")
+        assert zan_server, "PROC_HANDLER_PROVIDER_ZAN_URL must be set if PROC_HANDLER_ZAN_API_KEYS has been set"
+    else:
+        zan_api_key_keys = []
+
     scanner_url = os.environ.get("PROC_HANDLER_SCANNER_URL")
     config_coins = os.environ.get("PROC_HANDLER_COINS")
 
@@ -71,7 +83,7 @@ class Config(object):
     PROC_API_KEY = os.environ.get("PROC_API_KEY")
 
     assert network_name is not None, "PROC_HANDLER_NETWORK_NAME must be set"
-    assert validators.url(tron_server), "PROC_HANDLER_PROVIDER_URL must be a valid URL"
+    assert validators.url(trongrid_server), "PROC_HANDLER_PROVIDER_URL must be a valid URL"
     assert validators.url(scanner_url), "PROC_HANDLER_SCANNER_URL must be a valid URL"
 
     if start_block != "latest":
@@ -83,7 +95,7 @@ class Config(object):
     approve_accounts = 4
 
     allowed_slippage = 2
-    block_offset = 2
+    block_offset = 18
     min_admin_address_native_balance = 50 * (10 ** 6)
 
     WRITE_POOL_SIZE = 10
@@ -93,3 +105,4 @@ class Config(object):
     quote_decimal_factor = 1
 
     native_warning_threshold = 10  # count of transaction that can wallet handle before it's balance will be low
+    native_error_threshold = 2  # count of transaction that can wallet handle before it's balance will be critical

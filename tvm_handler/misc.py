@@ -8,6 +8,7 @@ from typing import Dict
 
 from config import Config as Cfg
 import api
+from web3_client import utils as web3_utils, providers
 
 
 def get_round_for_rate(rate: Decimal, quote_asset_precision=Decimal(0.01)) -> Decimal:
@@ -61,7 +62,8 @@ class AsyncPool(asyncio.Queue):
 
 class SharedVariables:
     def __init__(self):
-        self.last_handled_block = None
+        self.last_handled_block: int = None
+        self.trusted_block: int = None
         self.deposits_queue = asyncio.Queue()
 
         self.user_accounts: Dict[str, str] = {}  # {address: address_id}
@@ -71,14 +73,27 @@ class SharedVariables:
         self.user_accounts_event = asyncio.Event()
 
         self.api_keys_pool = AsyncPool()
-        self.api_keys_pool.put_all([(Cfg.tron_server, Cfg.tron_api_key),
-                                    (Cfg.tron_server, Cfg.tron_api_key2),
-                                    (Cfg.tron_server, Cfg.tron_api_key3)] * 10)
+        self.providers_request_explorer = web3_utils.TronRequestExplorer()
+
+        trongrid_providers = [(providers.AsyncTronGridHTTPProvider,
+                               {"endpoint_uri": Cfg.trongrid_server,
+                                "api_key": api_key,
+                                "request_explorer": self.providers_request_explorer}) for api_key in
+                              Cfg.trongrid_api_keys]
+
+        zan_providers = [(providers.AsyncZanHTTPProvider,
+                          {"endpoint_uri": Cfg.zan_server,
+                           "api_key": api_key,
+                           "request_explorer": self.providers_request_explorer}) for api_key in Cfg.zan_api_key_keys]
+
+        self.api_keys_pool.put_all([*trongrid_providers, *zan_providers] * 10)
+
         self.energy_price = 420
         self.coins_abi: Dict[str, Dict] = {}
         self.estimated_trc20_fee = 30_000_000  # TODO parse it using blocks
         self.estimated_native_fee = 3_000_000
 
+        self.block_parser_interval = 2
 
 startup_logger = get_logger("startup_logger")
 proc_api_client = api.proc_api_client.Client(Cfg.PROC_URL, Cfg.PROC_API_KEY)
