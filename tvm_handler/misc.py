@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import logging
+import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 import asyncio
@@ -7,7 +8,7 @@ from decimal import Decimal
 from typing import Dict
 
 from config import Config as Cfg
-import api
+from api import proc_api_client
 from web3_client import utils as web3_utils, providers
 
 
@@ -49,6 +50,22 @@ def get_logger(name):
     logger.addHandler(handler)
     return logger
 
+
+class StdErrToLogger:
+    def __init__(self, logger_: logging.Logger):
+        self.logger = logger_
+
+    def write(self, *args, **kwargs):
+        print(args)
+        print(kwargs)
+        self.logger.critical(str(args))
+
+    def flush(self):
+        pass
+
+
+std_logger = get_logger('std_logger')
+sys.stderr = StdErrToLogger(std_logger)
 
 path = Path(Cfg.LOG_PATH)
 path.mkdir(parents=True, exist_ok=True)
@@ -95,5 +112,5 @@ class SharedVariables:
 
         self.block_parser_interval = 2
 
-startup_logger = get_logger("startup_logger")
-proc_api_client = api.proc_api_client.Client(Cfg.PROC_URL, Cfg.PROC_API_KEY)
+
+proc_api_client = proc_api_client.Client(Cfg.PROC_URL, Cfg.PROC_API_KEY)
