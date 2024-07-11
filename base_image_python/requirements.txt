@@ -11,7 +11,7 @@ apscheduler==3.10.4
 
 # encryption
 itsdangerous==2.2.0
-PyJWT== 2.8.0
+PyJWT==2.8.0
 pycryptodome==3.20.0
 
 # webserver
@@ -28,7 +28,9 @@ asyncpg==0.29.0
 tronpy==0.5.0
 web3==6.19.0
 mnemonic==0.21
+trontxsize==1.0.6
 
 # other
 validators==0.28.1
 six==1.16.0
+pandas==2.2.2
