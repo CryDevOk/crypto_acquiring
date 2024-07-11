@@ -18,9 +18,11 @@ def dsn2alchemy_conn_string(dsn_string):
 
 
 engine = create_async_engine(dsn2alchemy_conn_string(Cfg.WRITE_DSN), pool_timeout=10, pool_recycle=3600,
-                             pool_size=Cfg.WRITE_POOL_SIZE, max_overflow=0, future=True)
+                             pool_size=Cfg.WRITE_POOL_SIZE, max_overflow=0, future=True, query_cache_size=0)
+engine.execution_options(compiled_cache=None)
 read_engine = create_async_engine(dsn2alchemy_conn_string(Cfg.READ_DSN), pool_timeout=10, pool_recycle=3600,
-                                  pool_size=Cfg.WRITE_POOL_SIZE, max_overflow=0, future=True)
+                                  pool_size=Cfg.WRITE_POOL_SIZE, max_overflow=0, future=True, query_cache_size=0)
+engine.execution_options(compiled_cache=None)
 
 write_async_session = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
 read_async_session = async_sessionmaker(read_engine, expire_on_commit=False, autoflush=False)
