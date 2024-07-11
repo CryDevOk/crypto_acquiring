@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import List, Tuple, Any, Union
 from sqlalchemy.orm import aliased
 
-from .models import User, UserAddress, Deposits, Withdrawals, Blocks, Coins, Balances
+from .models import Users, UserAddress, Deposits, Withdrawals, Blocks, Coins, Balances
 from config import Config as Cfg, StatCode as St
 
 
@@ -58,11 +58,11 @@ class DB(object):
         self.logger = logger
 
     async def _insert_user(self, user_id, role):
-        stmt = postgresql.insert(User).values({User.id.key: user_id, User.role.key: role})
+        stmt = postgresql.insert(Users).values({Users.id.key: user_id, Users.role.key: role})
         await self.session.execute(stmt)
 
     async def get_user_by_id(self, user_id: str, columns: List[Column]):
-        stmt = select(*columns).where(User.id == user_id)
+        stmt = select(*columns).where(Users.id == user_id)
         resp = await self.session.execute(stmt)
         data = resp.fetchone()
         return array_to_dict(columns, data)
@@ -91,26 +91,26 @@ class DB(object):
     async def users_addresses(self, role: Union[int, list] = None, limit: int = None) -> List[Tuple[str, str]]:
         stmt = select(UserAddress.id, UserAddress.public)
         if role:
-            stmt = stmt.join(User, User.id == UserAddress.user_id)
+            stmt = stmt.join(Users, Users.id == UserAddress.user_id)
             if isinstance(role, int):
-                stmt = stmt.where(User.role == role)
+                stmt = stmt.where(Users.role == role)
             elif isinstance(role, list):
-                stmt = stmt.where(User.role.in_(role))
+                stmt = stmt.where(Users.role.in_(role))
         if limit:
             stmt = stmt.limit(limit)
         resp = await self.session.execute(stmt)
         return resp.fetchall()
 
     async def all_accounts(self) -> List[Tuple[str, str]]:
-        stmt = select(UserAddress.id, UserAddress.public, User.role)
-        stmt = stmt.join(User, User.id == UserAddress.user_id)
+        stmt = select(UserAddress.id, UserAddress.public, Users.role)
+        stmt = stmt.join(Users, Users.id == UserAddress.user_id)
         resp = await self.session.execute(stmt)
         return resp.fetchall()
 
     async def get_random_user_id(self, role: Union[int, None] = None):
-        stmt = select(User.id)
+        stmt = select(Users.id)
         if role:
-            stmt = stmt.where(User.role == role)
+            stmt = stmt.where(Users.role == role)
         stmt = stmt.order_by(func.random()).limit(1)
         resp = await self.session.execute(stmt)
         return resp.scalar_one_or_none()
@@ -220,7 +220,7 @@ class DB(object):
 
     async def get_and_lock_unnotified_deposits(self, limit):
         subquery = (
-            select(Deposits.id, Deposits.address_id, User.id.label("user_id"), Deposits.contract_address,
+            select(Deposits.id, Deposits.address_id, Users.id.label("user_id"), Deposits.contract_address,
                    Coins.name.label("coin_name"), Coins.current_rate, Coins.decimal)
             .where(and_(
                 Deposits.locked_by_callback == False,  # Assuming 'locked_by_callback' is a Boolean column
@@ -228,7 +228,7 @@ class DB(object):
                 Deposits.time_to_callback < func.NOW()
             ))
             .join(UserAddress, UserAddress.id == Deposits.address_id)
-            .join(User, User.id == UserAddress.user_id)
+            .join(Users, Users.id == UserAddress.user_id)
             .join(Coins, Coins.contract_address == Deposits.contract_address)
             .limit(limit)
             .with_for_update()
@@ -354,7 +354,7 @@ class DB(object):
             await self.session.rollback()
             raise exc
 
-    async def get_and_lock_pending_deposits_coin(self, limit, admin_balance_threshold:int):
+    async def get_and_lock_pending_deposits_coin(self, limit, admin_balance_threshold: int):
         user = aliased(UserAddress)
         admin = aliased(UserAddress)
 
@@ -424,11 +424,12 @@ class DB(object):
 
     async def get_and_lock_pending_withdrawals(self, limit=10):
         subquery = (
-            select(UserAddress.user_id, UserAddress.id.label("admin_addr_id"), UserAddress.private.label("admin_private"), Balances.balance, Balances.coin_id)
-            .join(User, User.id == UserAddress.user_id)
+            select(UserAddress.user_id, UserAddress.id.label("admin_addr_id"),
+                   UserAddress.private.label("admin_private"), Balances.balance, Balances.coin_id)
+            .join(Users, Users.id == UserAddress.user_id)
             .where(and_(
-                UserAddress.locked_by_tx == False,  # Assuming 'locked_by_tx' is a Boolean column
-                User.role == St.SADMIN.v,
+                UserAddress.locked_by_tx == False,
+                Users.role == St.SADMIN.v,
             ))
             .join(Balances, Balances.address_id == UserAddress.id)
             .limit(limit)
@@ -470,8 +471,8 @@ class DB(object):
 
     async def get_free_admin_acc(self):
         stmt = select(UserAddress.id, UserAddress.public, UserAddress.private)
-        stmt = stmt.join(User, User.id == UserAddress.user_id)
-        stmt = stmt.where(and_(User.role == St.SADMIN.v, UserAddress.locked_by_tx == False))
+        stmt = stmt.join(Users, Users.id == UserAddress.user_id)
+        stmt = stmt.where(and_(Users.role == St.SADMIN.v, UserAddress.locked_by_tx == False))
         resp = await self.session.execute(stmt)
         return resp.scalar_one_or_none()
 
