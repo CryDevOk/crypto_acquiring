@@ -579,7 +579,7 @@ async def withdraw_handler():
     reqs = []
     async with write_async_session() as session:
         db = DB(session)
-        withdrawals = await db.get_and_lock_pending_withdrawals(Cfg.admin_accounts)
+        withdrawals = await db.get_and_lock_pending_withdrawals()
         if withdrawals:
             for withdrawal in withdrawals:
                 contract_address = withdrawal[Withdrawals.contract_address.key]

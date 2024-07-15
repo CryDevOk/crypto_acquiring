@@ -110,7 +110,8 @@ class Deposits(Base):
     address_id = Column(Integer, ForeignKey('user_address.id', ondelete='CASCADE'), nullable=False, unique=False)
     address = relationship("UserAddress", back_populates="_user_deposit")
 
-    contract_address = Column(String(42), ForeignKey('coins.contract_address', ondelete='CASCADE'), nullable=False, unique=False)
+    contract_address = Column(String(42), ForeignKey('coins.contract_address', ondelete='CASCADE'), nullable=False,
+                              unique=False)
     coin = relationship("Coins", back_populates="_coin_deposit")
 
     time_to_callback = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.fromtimestamp(0))
@@ -137,7 +138,8 @@ class Withdrawals(Base):
     user_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), nullable=False, unique=False)
     user = relationship("Users", back_populates="_user_withdrawal")
 
-    contract_address = Column(String(42), ForeignKey('coins.contract_address', ondelete='CASCADE'), nullable=False, unique=False)
+    contract_address = Column(String(42), ForeignKey('coins.contract_address', ondelete='CASCADE'), nullable=False,
+                              unique=False)
     coin = relationship("Coins", back_populates="_coin_withdrawal")
 
     time_to_callback = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.fromtimestamp(0))
@@ -162,7 +164,7 @@ class Withdrawals(Base):
 
 
 ddl_stmt1 = DDL("""
-create or replace function update_address_lock() RETURNS trigger AS $$
+CREATE OR REPLACE function update_address_lock() RETURNS trigger AS $$
 BEGIN
   update user_address AS adm set locked_by_tx = NEW.locked_by_tx_handler from user_address AS uat where adm.user_id = uat.admin_id AND uat.id = NEW.address_id;
   RETURN NEW;
@@ -171,11 +173,28 @@ $$ LANGUAGE plpgsql;
 """)
 
 ddl_stmt2 = DDL("""     
-CREATE TRIGGER on_update_deposits
+CREATE OR REPLACE TRIGGER on_update_deposits
   AFTER UPDATE of locked_by_tx_handler
   ON deposits
   FOR EACH ROW
   EXECUTE PROCEDURE update_address_lock();
+""")
+
+ddl_stmt3 = DDL("""
+CREATE OR REPLACE function update_address_lock_withdrawal() RETURNS trigger AS $$
+BEGIN
+  UPDATE user_address AS adm SET locked_by_tx = CASE WHEN NEW.admin_addr_id IS null THEN false ELSE true END WHERE adm.id = COALESCE(NEW.admin_addr_id, OLD.admin_addr_id);
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql; 
+""")
+
+ddl_stmt4 = DDL("""     
+CREATE OR REPLACE TRIGGER on_update_withdrawals
+  AFTER UPDATE of admin_addr_id
+  ON withdrawals
+  FOR EACH ROW
+  EXECUTE PROCEDURE update_address_lock_withdrawal();
 """)
 
 
@@ -183,3 +202,9 @@ CREATE TRIGGER on_update_deposits
 def my_func1(target, connection, **kw):
     connection.execute(ddl_stmt1)
     connection.execute(ddl_stmt2)
+
+
+@event.listens_for(Withdrawals.__table__, "after_create")
+def my_func2(target, connection, **kw):
+    connection.execute(ddl_stmt3)
+    connection.execute(ddl_stmt4)

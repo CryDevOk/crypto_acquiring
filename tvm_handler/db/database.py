@@ -424,44 +424,51 @@ class DB(object):
             await self.session.rollback()
             raise exc
 
-    async def get_and_lock_pending_withdrawals(self, limit=10):
-        subquery = (
-            select(UserAddress.user_id, UserAddress.id.label("admin_addr_id"),
-                   UserAddress.private.label("admin_private"), Balances.balance, Balances.coin_id)
-            .join(Users, Users.id == UserAddress.user_id)
-            .where(and_(
-                UserAddress.locked_by_tx == False,
-                Users.role == St.SADMIN.v,
-            ))
-            .join(Balances, Balances.address_id == UserAddress.id)
-            .limit(limit)
-            .with_for_update()
+    async def count_free_admins(self):
+        stmt = (
+            select(func.count())
+            .select_from(Users)
+            .join(UserAddress, UserAddress.user_id == Users.id)
+            .where(and_(Users.role == St.SADMIN.v, UserAddress.locked_by_tx == False))
         )
 
-        columns = [
-            Withdrawals.contract_address,
-            Withdrawals.id.label("withdrawal_id"),
-            Withdrawals.withdrawal_address,
-            Withdrawals.amount,
-            Withdrawals.tx_handler_period,
-            subquery.c.admin_addr_id,
-            subquery.c.admin_private
-        ]
+        resp = await self.session.execute(stmt)
+        return resp.scalar()
 
-        # Define the main query
+    async def get_and_lock_pending_withdrawals(self):
+        count_admins = await self.count_free_admins()
+
+        subquery = (
+            select(Withdrawals.id, UserAddress.id.label("admin_addr_id"), UserAddress.private.label("admin_private"))
+            .join(Balances, Balances.coin_id == Withdrawals.contract_address)
+            .join(UserAddress, UserAddress.id == Balances.address_id)
+            .join(Users, Users.id == UserAddress.user_id)
+            .where(and_(Withdrawals.tx_hash_out.is_(None),
+                        Withdrawals.admin_addr_id.is_(None),
+                        Withdrawals.contract_address == Balances.coin_id,
+                        Withdrawals.amount < Balances.balance,
+                        Users.role == St.SADMIN.v,
+                        UserAddress.locked_by_tx.is_(False)
+                        )
+                   ).limit(count_admins).with_for_update()
+        )
+
+        columns = [Withdrawals.contract_address,
+                   Withdrawals.id.label("withdrawal_id"),
+                   Withdrawals.withdrawal_address,
+                   Withdrawals.amount,
+                   Withdrawals.tx_handler_period,
+                   subquery.c.admin_addr_id,
+                   subquery.c.admin_private
+                   ]
+
         stmt = (
             update(Withdrawals)
             .values(admin_addr_id=subquery.c.admin_addr_id)
-            .where(and_(
-                Withdrawals.tx_hash_out.is_(None),
-                Withdrawals.admin_addr_id.is_(None),
-                Withdrawals.contract_address == subquery.c.coin_id,
-                Withdrawals.amount <= subquery.c.balance
-            ))
-            .returning(
-                *columns
-            )
+            .where(Withdrawals.id == subquery.c.id)
+            .returning(*columns)
         )
+
         try:
             resp = await self.session.execute(stmt)
             data = resp.fetchall()
