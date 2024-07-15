@@ -1,13 +1,13 @@
 import pytest
 import httpx
 
-from support_functions import Customer
+from support_functions import Customer, Account, DepositInfo
 from dotenv import dotenv_values
 
 config = dotenv_values("../../../.env_proc_api")
 
 customer = Customer.get_from_file()
-
+account = Account.get_from_file()
 
 @pytest.mark.parametrize("input_data, expected_status_code, expected_response", [
     ({"customer_id": customer.customer_id, "user_id": "test1"}, 200, {}),
@@ -31,5 +31,8 @@ def test_behavior(input_data, expected_status_code, expected_response):
                 assert "name" in v_ and isinstance(v_["name"], str)
                 assert "min_amount" in v_ and isinstance(v_["min_amount"], str)
                 assert "is_active" in v_ and isinstance(v_["is_active"], bool)
+
+        account.deposit_info = DepositInfo.load_from_dict(data["tron_nile"])
+        account.save_to_file(account)
 
 

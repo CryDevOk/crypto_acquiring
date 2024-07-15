@@ -58,3 +58,64 @@ customer_id: {self.customer_id}
         print(f"User email: {user_info} signed up successfully")
 
 
+class DepositInfo:
+    def __init__(self):
+        self.address = None
+        self.display_name = None
+        self.coins = None
+
+    def to_dict(self):
+        return {
+            "address": self.address,
+            "display_name": self.display_name,
+            "coins": self.coins
+        }
+
+    @classmethod
+    def load_from_dict(cls, data):
+        deposit_info = cls()
+        deposit_info.address = data["address"]
+        deposit_info.display_name = data["display_name"]
+        deposit_info.coins = data["coins"]
+        return deposit_info
+
+    def __str__(self):
+        return f"""
+address: {self.address}
+display_name: {self.display_name}
+coins: {self.coins}
+"""
+
+
+class Account:
+    def __init__(self, user_id: str, deposit_info: DepositInfo | None = None):
+        self.user_id = user_id
+        self.deposit_info = deposit_info
+
+    def to_dict(self):
+        return {
+            "user_id": self.user_id,
+            "deposit_info": self.deposit_info.to_dict() if self.deposit_info else {}
+        }
+
+    def save_to_file(self, account):
+        account_data = self.to_dict()
+        save_json(f"{account.__class__.__name__}.json", account_data)
+        print(f"Account: {account} created successfully")
+
+    @classmethod
+    def get_from_file(cls):
+        data = load_json(f"{Account.__name__}.json")
+        return Account.load_from_dict(data)
+
+    @classmethod
+    def load_from_dict(cls, data):
+        deposit_info = DepositInfo.load_from_dict(data["deposit_info"]) if data.get("deposit_info") else None
+        account = cls(data["user_id"], deposit_info)
+        return account
+
+    def __str__(self):
+        return f"""
+user_id: {self.user_id}
+deposit_info: {self.deposit_info}
+"""
