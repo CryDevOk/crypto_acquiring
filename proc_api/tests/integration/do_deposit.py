@@ -21,7 +21,7 @@ def trx_deposit():
     priv_key = PrivateKey(bytes.fromhex(private_key))
 
     txn = (
-        client.trx.transfer(priv_key.public_key.to_base58check_address(), account.deposit_info.address, 5_000_000)
+        client.trx.transfer(priv_key.public_key.to_base58check_address(), account.deposit_info.address, 6_300_000)
         .build()
         .sign(priv_key)
     )

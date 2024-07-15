@@ -10,7 +10,7 @@ customer = Customer.get_from_file()
 account = Account.get_from_file()
 
 @pytest.mark.parametrize("input_data, expected_status_code, expected_response", [
-    ({"customer_id": customer.customer_id, "user_id": "test1"}, 200, {}),
+    ({"customer_id": customer.customer_id, "user_id": account.user_id}, 200, {}),
 ])
 def test_behavior(input_data, expected_status_code, expected_response):
     response = httpx.get(f"http://localhost:{config['PROC_PORT']}/v1/api/private/user/get_deposit_info", params=input_data,

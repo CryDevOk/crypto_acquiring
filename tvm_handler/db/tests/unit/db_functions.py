@@ -19,5 +19,11 @@ async def get_withdrawals():
         print(withdrawals)
 
 
+async def get_deposits():
+    async with read_async_session() as session:
+        db = DB(session, None)
+        deposits = await db.get_and_lock_pending_deposits_native()
+        print(deposits)
+
 if __name__ == "__main__":
-    asyncio.run(get_withdrawals())
+    asyncio.run(get_deposits())
