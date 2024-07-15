@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
 
 import logging
+import sys
 from logging.handlers import RotatingFileHandler
+from logging.handlers import QueueHandler, QueueListener
+from queue import Queue
 from pathlib import Path
 from config import Config as Cfg
 
@@ -21,6 +24,19 @@ def get_logger(name):
     return logger
 
 
+class StdErrToLogger:
+    def __init__(self, logger_: logging.Logger):
+        self.logger = logger_
+
+    def write(self, *args, **kwargs):
+        self.logger.critical(str(args))
+
+    def flush(self):
+        pass
+
+
+std_logger = get_logger('std_logger')
+sys.stderr = StdErrToLogger(std_logger)
+
 path = Path(Cfg.LOG_PATH)
 path.mkdir(parents=True, exist_ok=True)
-

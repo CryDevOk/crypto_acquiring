@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from sqlalchemy import and_, func, select, update, Column, Row
+from sqlalchemy import and_, func, select, update, Column, Row, literal_column
 
 from db.models import User, NetworkHandlers, Customer, Callbacks
 from config import Config as Cfg
@@ -46,17 +46,28 @@ class DB(object):
             await self.session.rollback()
             raise e
 
-    async def verify_customer(self, customer_id, api_key, user_id=None):
-        if user_id:
-            stmt = select(User.id).join(Customer, User.customer_id == Customer.id).where(
-                and_(Customer.id == customer_id,
-                     Customer.api_key == api_key,
-                     User.id == user_id))
-        else:
-            stmt = select(Customer.id).where(and_(Customer.id == customer_id, Customer.api_key == api_key))
+    async def update_customer_by_callback_url(self, callback_url, data: dict):
+        stmt = update(Customer).where(Customer.callback_url == callback_url).values(data).returning(Customer.id)
         resp = await self.session.execute(stmt)
-        data = resp.fetchall()
-        return len(data) == 1
+        data = resp.fetchone()
+        await self.session.commit()
+        return array_to_dict([Customer.id], data)
+
+    async def verify_customer(self, customer_id, api_key) -> bool:
+        stmt = select(Customer.id).where(and_(Customer.id == customer_id, Customer.api_key == api_key))
+        resp = await self.session.execute(stmt)
+        data = resp.fetchone()
+        return bool(data)
+
+    async def verify_customer_and_user(self, customer_id, api_key, user_id) -> tuple[bool, bool]:
+        stmt = select(Customer.id, User.customer_id).outerjoin(
+            User,
+            and_(User.customer_id == Customer.id, User.id == user_id)
+        ).where(and_(Customer.id == customer_id, Customer.api_key == api_key))
+
+        resp = await self.session.execute(stmt)
+        data = resp.fetchone()
+        return bool(data), bool(data[1])
 
     async def insert_user(self, user_id, customer_id, role):
         stmt = postgresql.insert(User).values({User.id.key: user_id,
