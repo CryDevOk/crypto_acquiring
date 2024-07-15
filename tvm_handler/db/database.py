@@ -315,10 +315,14 @@ class DB(object):
         user = aliased(UserAddress)
         admin = aliased(UserAddress)
 
-        subquery = (select(Deposits.id,
-                           user.private.label('user_private'),
-                           admin.public.label('admin_public'),
-                           ).where(and_(
+        subquery = (select(
+            user.approve_id,
+            Deposits.id,
+            user.private.label('user_private'),
+            admin.public.label('admin_public'),
+        )
+                    .distinct(Deposits.address_id)
+                    .where(and_(
             Deposits.contract_address == St.native.v,
             Deposits.tx_hash_out.is_(None),
             Deposits.locked_by_tx_handler == False,
@@ -328,10 +332,10 @@ class DB(object):
                     .join(user, user.id == Deposits.address_id)
                     .join(admin, user.admin_id == admin.user_id)
                     .limit(limit)
-                    .with_for_update()
                     )
 
         columns = [
+            subquery.c.approve_id,
             Deposits.id.label("deposit_id"),
             Deposits.amount,
             subquery.c.user_private,

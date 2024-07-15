@@ -166,7 +166,7 @@ class Withdrawals(Base):
 ddl_stmt1 = DDL("""
 CREATE OR REPLACE function update_address_lock() RETURNS trigger AS $$
 BEGIN
-  update user_address AS adm set locked_by_tx = NEW.locked_by_tx_handler from user_address AS uat where adm.user_id = uat.admin_id AND uat.id = NEW.address_id;
+  UPDATE user_address AS adm SET locked_by_tx = NEW.locked_by_tx_handler FROM (SELECT id FROM user_address WHERE id = NEW.address_id) AS foo WHERE adm.id = foo.id;
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql; 
