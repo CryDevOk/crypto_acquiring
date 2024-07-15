@@ -311,7 +311,7 @@ class DB(object):
             await self.session.rollback()
             raise exc
 
-    async def get_and_lock_pending_deposits_native(self, limit):
+    async def get_and_lock_pending_deposits_native(self, limit=5):
         user = aliased(UserAddress)
         admin = aliased(UserAddress)
 
@@ -324,9 +324,11 @@ class DB(object):
             Deposits.locked_by_tx_handler == False,
             Deposits.time_to_tx_handler < func.NOW()
         )
-        ).limit(limit).with_for_update()
+        )
                     .join(user, user.id == Deposits.address_id)
                     .join(admin, user.admin_id == admin.user_id)
+                    .limit(limit)
+                    .with_for_update()
                     )
 
         columns = [
@@ -386,7 +388,7 @@ class DB(object):
             Deposits.time_to_tx_handler < func.NOW(),
             user.approve_id == subquery_approve.c.approve_id
         )
-        ).limit(limit).with_for_update()
+        ).with_for_update()
                     .join(user, user.id == Deposits.address_id)
                     .join(admin, user.admin_id == admin.user_id)
                     )
@@ -407,9 +409,7 @@ class DB(object):
         stmt = (
             update(Deposits)
             .values(locked_by_tx_handler=True)
-            .where(and_(
-                Deposits.id == subquery.c.id
-            ))
+            .where(Deposits.id == subquery.c.id)
             .returning(
                 *columns
             )

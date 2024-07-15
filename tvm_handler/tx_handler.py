@@ -496,7 +496,7 @@ async def tx_conductor_native():
     reqs = []
     async with write_async_session() as session:
         db = DB(session)
-        deposits = await db.get_and_lock_pending_deposits_native(7)
+        deposits = await db.get_and_lock_pending_deposits_native()
 
         if deposits:
             for deposit in deposits:
