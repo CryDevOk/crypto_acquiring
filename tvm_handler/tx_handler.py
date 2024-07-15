@@ -6,7 +6,7 @@ from web3_client import utils as web3_utils
 from web3_client.async_client import MyAsyncTron, TRC20, BuildTransactionError, TransactionNotFound, TvmError, \
     UnableToGetReceiptError, ApiError, BadSignature, TaposError, TransactionError, ValidationError
 from db.database import DB, write_async_session, read_async_session, Withdrawals
-from db.models import Deposits, Coins
+from db.models import Deposits, Coins, UserAddress
 from config import Config as Cfg, StatCode as St
 import api
 
@@ -595,6 +595,8 @@ async def withdraw_handler():
                 conn_creds, withdrawal_id, tx_handler_period, adm_address_id = req_ident
                 await variables.api_keys_pool.put(conn_creds)
                 if not err:
+                    await db.update_user_address_by_id(adm_address_id, {UserAddress.locked_by_tx.key: False},
+                                                       commit=False)
                     await db.update_withdrawal_by_id(withdrawal_id, {Withdrawals.tx_hash_out.key: tx_hash}, commit=True)
                 else:
                     log_params = {"withdrawal_id": withdrawal_id, "adm_address_id": adm_address_id,
