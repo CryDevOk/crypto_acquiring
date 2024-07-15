@@ -1,6 +1,3 @@
-version: "3.5"
-
-
 services:
   echo-server:
     image: ealen/echo-server
