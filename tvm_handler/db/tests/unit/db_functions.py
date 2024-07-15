@@ -15,7 +15,7 @@ from db.database import DB, read_async_session, write_async_session
 async def get_withdrawals():
     async with read_async_session() as session:
         db = DB(session, None)
-        withdrawals = await db.get_and_lock_pending_withdrawals(10)
+        withdrawals = await db.get_and_lock_pending_withdrawals()
         print(withdrawals)
 
 
