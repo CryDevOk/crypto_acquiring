@@ -497,7 +497,6 @@ async def tx_conductor_native():
     async with write_async_session() as session:
         db = DB(session)
         deposits = await db.get_and_lock_pending_deposits_native()
-        print(len(deposits), deposits)
         if deposits:
             for deposit in deposits:
                 conn_creds: list[tuple[str, str]] = await variables.api_keys_pool.get()

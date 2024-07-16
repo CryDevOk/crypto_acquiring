@@ -316,7 +316,6 @@ class DB(object):
         admin = aliased(UserAddress)
 
         subquery = (select(
-            user.approve_id,
             Deposits.id,
             user.private.label('user_private'),
             admin.public.label('admin_public'),
@@ -335,7 +334,6 @@ class DB(object):
                     )
 
         columns = [
-            subquery.c.approve_id,
             Deposits.id.label("deposit_id"),
             Deposits.amount,
             subquery.c.user_private,
