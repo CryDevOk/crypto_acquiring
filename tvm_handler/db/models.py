@@ -163,23 +163,6 @@ class Withdrawals(Base):
     user_currency = Column(String(16), nullable=False)
 
 
-ddl_stmt1 = DDL("""
-CREATE OR REPLACE function update_address_lock() RETURNS trigger AS $$
-BEGIN
-  UPDATE user_address AS adm SET locked_by_tx = NEW.locked_by_tx_handler FROM (SELECT id FROM user_address WHERE id = NEW.address_id) AS foo WHERE adm.id = foo.id;
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql; 
-""")
-
-ddl_stmt2 = DDL("""     
-CREATE OR REPLACE TRIGGER on_update_deposits
-  AFTER UPDATE of locked_by_tx_handler
-  ON deposits
-  FOR EACH ROW
-  EXECUTE PROCEDURE update_address_lock();
-""")
-
 ddl_stmt3 = DDL("""
 CREATE OR REPLACE function update_address_lock_withdrawal() RETURNS trigger AS $$
 BEGIN
@@ -197,11 +180,6 @@ CREATE OR REPLACE TRIGGER on_update_withdrawals
   EXECUTE PROCEDURE update_address_lock_withdrawal();
 """)
 
-
-@event.listens_for(Deposits.__table__, "after_create")
-def my_func1(target, connection, **kw):
-    connection.execute(ddl_stmt1)
-    connection.execute(ddl_stmt2)
 
 
 @event.listens_for(Withdrawals.__table__, "after_create")

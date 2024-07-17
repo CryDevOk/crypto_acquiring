@@ -325,7 +325,8 @@ class DB(object):
             Deposits.contract_address == St.native.v,
             Deposits.tx_hash_out.is_(None),
             Deposits.locked_by_tx_handler == False,
-            Deposits.time_to_tx_handler < func.NOW()
+            Deposits.time_to_tx_handler < func.NOW(),
+            user.locked_by_tx == False
         )
         )
                     .join(user, user.id == Deposits.address_id)
@@ -338,7 +339,8 @@ class DB(object):
             Deposits.amount,
             subquery.c.user_private,
             subquery.c.admin_public,
-            Deposits.tx_handler_period
+            Deposits.tx_handler_period,
+            Deposits.address_id
         ]
         stmt = (
             update(Deposits)
@@ -353,46 +355,51 @@ class DB(object):
 
         try:
             resp = await self.session.execute(stmt)
-            data = resp.fetchall()
+            data = [array_to_dict(columns, row) for row in resp.fetchall()]
+
+            user_addresses = [row['address_id'] for row in data]
+            user_addresses_to_lock_stmt = update(UserAddress).values(locked_by_tx=True).where(
+                UserAddress.id.in_(user_addresses))
+
+            await self.session.execute(user_addresses_to_lock_stmt)
+
             await self.session.commit()
-            return [array_to_dict(columns, row) for row in data]
+
         except Exception as exc:
             await self.session.rollback()
             raise exc
+        else:
+            return data
 
-    async def get_and_lock_pending_deposits_coin(self, limit, admin_balance_threshold: int):
+    async def get_and_lock_pending_deposits_coin(self, limit=5):
         user = aliased(UserAddress)
+        approve = aliased(UserAddress)
         admin = aliased(UserAddress)
 
-        subquery_approve = (select(UserAddress.user_id.label('approve_id'),
-                                   UserAddress.public.label('approve_public'),
-                                   UserAddress.private.label('approve_private'),
-                                   ).where(and_(
-            Balances.coin_id == St.native.v,
-            Balances.balance >= admin_balance_threshold
+        subquery = (select(
+            Deposits.id,
+            Deposits.address_id,
+            Deposits.contract_address,
+            user.public.label('user_public'),
+            user.private.label('user_private'),
+            admin.public.label('admin_public'),
+            approve.id.label('approve_id'),
+            approve.public.label('approve_public'),
+            approve.private.label('approve_private')
         )
-        )
-                            .join(Balances, Balances.address_id == UserAddress.id)
-                            )
-
-        subquery = (select(Deposits.id,
-                           Deposits.address_id,
-                           Deposits.contract_address,
-                           user.public.label('user_public'),
-                           user.private.label('user_private'),
-                           admin.public.label('admin_public'),
-                           subquery_approve.c.approve_id,
-                           subquery_approve.c.approve_public,
-                           subquery_approve.c.approve_private).where(and_(
+                    .distinct(Deposits.address_id)
+                    .where(and_(
             Deposits.contract_address != St.native.v,
             Deposits.tx_hash_out.is_(None),
             Deposits.locked_by_tx_handler == False,
             Deposits.time_to_tx_handler < func.NOW(),
-            user.approve_id == subquery_approve.c.approve_id
+            approve.locked_by_tx == False
         )
-        ).with_for_update()
+        )
                     .join(user, user.id == Deposits.address_id)
+                    .join(approve, user.approve_id == approve.user_id)
                     .join(admin, user.admin_id == admin.user_id)
+                    .limit(limit)
                     )
 
         columns = [
@@ -405,7 +412,8 @@ class DB(object):
             subquery.c.approve_private,
             Deposits.id.label("deposit_id"),
             Deposits.amount,
-            Deposits.tx_handler_period
+            Deposits.tx_handler_period,
+            Deposits.address_id
         ]
 
         stmt = (
@@ -419,12 +427,27 @@ class DB(object):
 
         try:
             resp = await self.session.execute(stmt)
-            data = resp.fetchall()
+            data = [array_to_dict(columns, row) for row in resp.fetchall()]
+
+            approve_addresses = [row['approve_id'] for row in data]
+            approve_addr_to_lock_stmt = update(UserAddress).values(locked_by_tx=True).where(
+                UserAddress.id.in_(approve_addresses))
+
+            user_addresses = [row['address_id'] for row in data]
+            user_addresses_to_lock_stmt = update(UserAddress).values(locked_by_tx=True).where(
+                UserAddress.id.in_(user_addresses))
+
+            await self.session.execute(approve_addr_to_lock_stmt)
+            await self.session.execute(user_addresses_to_lock_stmt)
+
             await self.session.commit()
-            return [array_to_dict(columns, row) for row in data]
+
         except Exception as exc:
             await self.session.rollback()
             raise exc
+
+        else:
+            return data
 
     async def count_free_admins(self):
         stmt = (

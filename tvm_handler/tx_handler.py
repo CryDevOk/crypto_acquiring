@@ -74,8 +74,9 @@ async def coin_transfer_to_admin(
         approve_private,
         deposit_id,
         amount,
-        tx_handler_period) -> tuple[None, Exception, tuple[type, type, type, type]] | \
-                              tuple[type, None, tuple[type, type, type, type]]:
+        tx_handler_period,
+        address_id) -> tuple[None, Exception, tuple[type, type, type, type, type]] | \
+                       tuple[type, None, tuple[type, type, type, type, type]]:
     amount = int(amount)
     try:
         async with MyAsyncTron(*conn_creds) as client:
@@ -92,9 +93,9 @@ async def coin_transfer_to_admin(
             else:
                 res = await contract.transfer_from(user_public, admin_public, amount, approve_private)
     except Exception as exc:
-        return None, exc, (conn_creds, deposit_id, tx_handler_period, approve_id)
+        return None, exc, (conn_creds, deposit_id, tx_handler_period, approve_id, address_id)
     else:
-        return res, None, (conn_creds, deposit_id, tx_handler_period, approve_id)
+        return res, None, (conn_creds, deposit_id, tx_handler_period, approve_id, address_id)
 
 
 async def withdraw_coin(conn_creds,
@@ -483,9 +484,10 @@ async def block_parser():
         await variables.api_keys_pool.put(conn_creds_2)
 
 
-async def postpone_deposit_handling(db, deposit_id, tx_handler_period):
+async def postpone_deposit_handling(db, deposit_id, tx_handler_period, address_id):
     time_to_tx_handler = datetime.now(timezone.utc) + timedelta(seconds=tx_handler_period)
     tx_handler_period += 30
+    await db.update_user_address_by_id(address_id, {UserAddress.locked_by_tx.key: False}, commit=False)
     await db.update_deposit_by_id(deposit_id, {Deposits.locked_by_tx_handler.key: False,
                                                Deposits.time_to_tx_handler.key: time_to_tx_handler,
                                                Deposits.tx_handler_period.key: tx_handler_period},
@@ -505,9 +507,10 @@ async def tx_conductor_native():
             results = await asyncio.gather(*reqs)
 
             for tx_hash, err, req_ident in results:
-                conn_creds, deposit_id, tx_handler_period = req_ident
+                conn_creds, deposit_id, tx_handler_period, address_id = req_ident
                 await variables.api_keys_pool.put(conn_creds)
                 if not err:
+                    await db.update_user_address_by_id(address_id, {UserAddress.locked_by_tx.key: False}, commit=False)
                     await db.update_deposit_by_id(deposit_id, {Deposits.tx_hash_out.key: tx_hash,
                                                                Deposits.locked_by_tx_handler.key: False}, commit=True)
                 else:  # exception handling
@@ -515,7 +518,7 @@ async def tx_conductor_native():
                     if isinstance(err, (BuildTransactionError, TransactionNotFound, TvmError, ApiError,
                                         BadSignature, TaposError, TransactionError, ValidationError)):
                         common_logger.error(f"tx_conductor_native error {log_params}")
-                        await postpone_deposit_handling(db, deposit_id, tx_handler_period)
+                        await postpone_deposit_handling(db, deposit_id, tx_handler_period, address_id)
                     else:
                         if isinstance(err, UnableToGetReceiptError):
                             common_logger.critical(f"tx_conductor_native error {log_params}")
@@ -528,24 +531,25 @@ async def native_transfer_to_admin(conn_creds,
                                    amount,
                                    user_private,
                                    admin_public,
-                                   tx_handler_period) -> tuple[None, Exception, tuple[type, type, type]] | \
-                                                         tuple[type, None, tuple[type, type, type]]:
+                                   tx_handler_period,
+                                   address_id) -> tuple[None, Exception, tuple[type, type, type, type]] | \
+                                                  tuple[type, None, tuple[type, type, type, type]]:
     amount = int(amount)
     amount_with_fee: int = amount - variables.estimated_native_fee
     try:
         async with MyAsyncTron(*conn_creds) as client:
             res = await client.trx_transfer(admin_public, amount_with_fee, user_private)
     except Exception as exc:
-        return None, exc, (conn_creds, deposit_id, tx_handler_period)
+        return None, exc, (conn_creds, deposit_id, tx_handler_period, address_id)
     else:
-        return res, None, (conn_creds, deposit_id, tx_handler_period)
+        return res, None, (conn_creds, deposit_id, tx_handler_period, address_id)
 
 
 async def tx_conductor_coin():
     reqs = []
     async with write_async_session() as session:
         db = DB(session)
-        deposits = await db.get_and_lock_pending_deposits_coin(5, variables.estimated_trc20_fee)
+        deposits = await db.get_and_lock_pending_deposits_coin()
 
         if deposits:
             for deposit in deposits:
@@ -555,9 +559,13 @@ async def tx_conductor_coin():
             results = await asyncio.gather(*reqs)
 
             for tx_hash, err, req_ident in results:
-                conn_creds, deposit_id, tx_handler_period, approve_id = req_ident
+                conn_creds, deposit_id, tx_handler_period, approve_id, address_id = req_ident
                 await variables.api_keys_pool.put(conn_creds)
+
+                await db.update_user_address_by_id(approve_id, {UserAddress.locked_by_tx.key: False}, commit=False)
+
                 if not err:
+                    await db.update_user_address_by_id(address_id, {UserAddress.locked_by_tx.key: False}, commit=False)
                     await db.update_deposit_by_id(deposit_id, {Deposits.tx_hash_out.key: tx_hash,
                                                                Deposits.locked_by_tx_handler.key: False}, commit=True)
                 else:  # exception handling
@@ -566,7 +574,7 @@ async def tx_conductor_coin():
                                         TransactionNotFound, TvmError, ApiError,
                                         BadSignature, TaposError, TransactionError, ValidationError)):
                         common_logger.error(f"tx_conductor_coin error {log_params}")
-                        await postpone_deposit_handling(db, deposit_id, tx_handler_period)
+                        await postpone_deposit_handling(db, deposit_id, tx_handler_period, address_id)
                     else:
                         if isinstance(err, UnableToGetReceiptError):
                             common_logger.critical(f"tx_conductor_coin error {log_params}")
