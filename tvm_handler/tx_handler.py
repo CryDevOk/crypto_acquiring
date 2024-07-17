@@ -19,6 +19,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.job import Job
 from datetime import datetime, timedelta, timezone
 import httpx
+import traceback
 
 
 class PreparingTransactionError(Exception):
@@ -713,7 +714,7 @@ async def main():
         await update_in_memory_accounts()
         await update_coin_rates()
     except Exception as exc:
-        startup_logger.error(f"launch failed {exc}")
+        startup_logger.error(f"launch failed {traceback.format_exc()}")
         raise Exception(f"launch failed {exc}")
     else:
         startup_logger.info("launch success")
