@@ -77,14 +77,16 @@ def to_hex_address(raw_addr: str | bytes) -> str:
 
 
 class TronRequestExplorer:
-    def __init__(self, clean_time_frame: timedelta = timedelta(hours=24)):
+    def __init__(self, provider_name, clean_time_frame: timedelta = timedelta(hours=24)):
         self.df = pd.DataFrame(columns=['timestamp', 'http_code'])
         self.clean_time_frame = clean_time_frame
         self.lock = asyncio.Lock()
+        self.provider_name = provider_name
 
     async def add_request(self, request_http_code):
         async with self.lock:
-            new_row = pd.DataFrame({'timestamp': [datetime.now()], 'http_code': [request_http_code]})
+            new_row = pd.DataFrame(
+                {'timestamp': [datetime.now()], 'http_code': [request_http_code], 'provider': [self.provider_name]})
             if self.df.empty:
                 self.df = new_row
             else:
@@ -120,6 +122,7 @@ class TronRequestExplorer:
         message = f"Total requests: {all_requests}\n"
         for code, count in status_codes.items():
             message += f"Status code {code}: {count} ({count / all_requests:.2%})\n"
+        message = message.rstrip('\n')
         return message
 
     async def rps(self, time_frame: timedelta):

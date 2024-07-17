@@ -7,6 +7,8 @@ from web3_client.utils import TronRequestExplorer
 
 
 class AsyncTronGridHTTPProvider(async_http.AsyncHTTPProvider):
+    name = "TronGrid"
+
     def __init__(
             self,
             endpoint_uri: str | dict = None,
@@ -44,6 +46,8 @@ class AsyncTronGridHTTPProvider(async_http.AsyncHTTPProvider):
 
 
 class AsyncZanHTTPProvider(async_http.AsyncHTTPProvider):
+    name = "Zan"
+
     def __init__(
             self,
             endpoint_uri: str = None,

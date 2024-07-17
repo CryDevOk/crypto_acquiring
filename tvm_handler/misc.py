@@ -6,6 +6,8 @@ from pathlib import Path
 import asyncio
 from decimal import Decimal
 from typing import Dict
+import time
+import random
 
 from config import Config as Cfg
 from api import proc_api_client
@@ -71,10 +73,33 @@ path = Path(Cfg.LOG_PATH)
 path.mkdir(parents=True, exist_ok=True)
 
 
-class AsyncPool(asyncio.Queue):
-    def put_all(self, list_items):
-        for item in list_items:
-            self.put_nowait(item)
+class ProviderCaller:
+    def __init__(self, provider,
+                 url,
+                 api_key):
+        self.provider = provider
+        self.url = url
+        self.api_key = api_key
+        self.request_explorer = web3_utils.TronRequestExplorer(self.provider.name)
+        self.is_enabled = True
+        self.pause = 0
+
+    def __call__(self) -> providers.AsyncTronGridHTTPProvider | providers.AsyncZanHTTPProvider:
+        self.last_used = time.time()
+        return self.provider(endpoint_uri=self.url, api_key=self.api_key, request_explorer=self.request_explorer)
+
+
+class ProvidersPool:
+    def __init__(self, providers: list[ProviderCaller]):
+        self.providers = providers
+
+    async def get(self) -> providers.AsyncTronGridHTTPProvider | providers.AsyncZanHTTPProvider:
+        enabled_providers = [provider for provider in self.providers if provider.is_enabled]
+        return random.choice(enabled_providers)()
+
+    async def refresh(self):
+        disabled_providers = [provider for provider in self.providers if not provider.is_enabled]
+        pass
 
 
 class SharedVariables:
@@ -89,21 +114,15 @@ class SharedVariables:
 
         self.user_accounts_event = asyncio.Event()
 
-        self.api_keys_pool = AsyncPool()
-        self.providers_request_explorer = web3_utils.TronRequestExplorer()
+        trongrid_provider = ProviderCaller(providers.AsyncTronGridHTTPProvider,
+                                           Cfg.trongrid_server,
+                                           Cfg.trongrid_api_keys[0])
 
-        trongrid_providers = [(providers.AsyncTronGridHTTPProvider,
-                               {"endpoint_uri": Cfg.trongrid_server,
-                                "api_key": api_key,
-                                "request_explorer": self.providers_request_explorer}) for api_key in
-                              Cfg.trongrid_api_keys]
+        zan_provider = ProviderCaller(providers.AsyncZanHTTPProvider,
+                                      Cfg.zan_server,
+                                      Cfg.zan_api_key_keys[0])
 
-        zan_providers = [(providers.AsyncZanHTTPProvider,
-                          {"endpoint_uri": Cfg.zan_server,
-                           "api_key": api_key,
-                           "request_explorer": self.providers_request_explorer}) for api_key in Cfg.zan_api_key_keys]
-
-        self.api_keys_pool.put_all([*trongrid_providers, *zan_providers] * 10)
+        self.providers_pool = ProvidersPool([trongrid_provider, zan_provider])
 
         self.energy_price = 420
         self.coins_abi: Dict[str, Dict] = {}

@@ -25,6 +25,7 @@ from tronpy.exceptions import (
 )
 
 from web3_client.utils import generate_mnemonic, keys_from_mnemonic, trc20_abi, TronRequestExplorer, calculate_tx_id
+from web3_client.providers import AsyncTronGridHTTPProvider, AsyncZanHTTPProvider
 
 
 class BalanceError(Exception):
@@ -130,7 +131,7 @@ class MyAsyncTrx(AsyncTrx):
 
 
 class MyAsyncTron(AsyncTron):
-    def __init__(self, provider: callable, provider_args: dict = None, conf: dict = None):
+    def __init__(self, provider: AsyncTronGridHTTPProvider | AsyncZanHTTPProvider, conf: dict = None):
         self.client = None
 
         self.conf = DEFAULT_CONF
@@ -139,7 +140,7 @@ class MyAsyncTron(AsyncTron):
         if conf is not None:
             self.conf = dict(DEFAULT_CONF, **conf)
 
-        self.provider = provider(**(provider_args or {}))
+        self.provider = provider
         self._trx = MyAsyncTrx(self)
 
         super(MyAsyncTron).__init__()

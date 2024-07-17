@@ -32,18 +32,22 @@ class PreparingTransactionError(Exception):
 
 async def explorer(interval: int, block_parser_job: Job):
     timeframe = timedelta(seconds=interval)
-    rps = await variables.providers_request_explorer.rps(timeframe)
-    description = await variables.providers_request_explorer.description_by_status_code(timeframe)
+
     # share_unsuccessful_requests = await variables.providers_request_explorer.share_unsuccessful_requests(timeframe)
-    providers_api_logger.info(
-        f"{description}"
-        f"\nRequests per second for {interval} seconds: {rps}"
-        f"\nBlock parser interval: {variables.block_parser_interval}")
+    message = ""
+    for provider in variables.providers_pool.providers:
+        rps = await provider.request_explorer.rps(timeframe)
+        description = await provider.request_explorer.description_by_status_code(timeframe)
+        message += f"{provider.provider.name}:\n{description}\nRequests per second: {rps:.2}\n\n"
+
+    providers_api_logger.info(f"Requests statistics for the last {interval} seconds:\n{message}")
 
     block_parser_job.reschedule(
         trigger='interval',
         seconds=variables.block_parser_interval
     )
+
+    common_logger.info(f"Last handled block: {variables.last_handled_block}")
 
     slippage = variables.trusted_block - variables.last_handled_block > Cfg.block_offset * Cfg.allowed_slippage
     if slippage:
@@ -64,7 +68,7 @@ async def explorer(interval: int, block_parser_job: Job):
 
 
 async def coin_transfer_to_admin(
-        conn_creds,
+        provider,
         contract_address,
         user_public,
         user_private,
@@ -75,11 +79,11 @@ async def coin_transfer_to_admin(
         deposit_id,
         amount,
         tx_handler_period,
-        address_id) -> tuple[None, Exception, tuple[type, type, type, type, type]] | \
-                       tuple[type, None, tuple[type, type, type, type, type]]:
+        address_id) -> tuple[None, Exception, tuple[type, type, type, type]] | \
+                       tuple[type, None, tuple[type, type, type, type]]:
     amount = int(amount)
     try:
-        async with MyAsyncTron(*conn_creds) as client:
+        async with MyAsyncTron(provider) as client:
             contract = TRC20(client, contract_address, abi_info=web3_utils.trc20_abi)
             try:
                 allowance: int = await contract.allowance(user_public, approve_public)
@@ -93,12 +97,12 @@ async def coin_transfer_to_admin(
             else:
                 res = await contract.transfer_from(user_public, admin_public, amount, approve_private)
     except Exception as exc:
-        return None, exc, (conn_creds, deposit_id, tx_handler_period, approve_id, address_id)
+        return None, exc, (deposit_id, tx_handler_period, approve_id, address_id)
     else:
-        return res, None, (conn_creds, deposit_id, tx_handler_period, approve_id, address_id)
+        return res, None, (deposit_id, tx_handler_period, approve_id, address_id)
 
 
-async def withdraw_coin(conn_creds,
+async def withdraw_coin(provider,
                         contract_address,
                         withdrawal_address,
                         amount,
@@ -107,20 +111,20 @@ async def withdraw_coin(conn_creds,
                         tx_handler_period,
                         admin_addr_id,
                         **_
-                        ) -> tuple[None, Exception, tuple[type, type, type, type]] | \
-                             tuple[type, None, tuple[type, type, type, type]]:
+                        ) -> tuple[None, Exception, tuple[type, type, type]] | \
+                             tuple[type, None, tuple[type, type, type]]:
     amount = int(amount)
     try:
-        async with MyAsyncTron(*conn_creds) as client:
+        async with MyAsyncTron(provider) as client:
             contract = TRC20(client, contract_address, abi_info=web3_utils.trc20_abi)
             res = await contract.transfer(withdrawal_address, amount, admin_private)
     except Exception as exc:
-        return None, exc, (conn_creds, withdrawal_id, tx_handler_period, admin_addr_id)
+        return None, exc, (withdrawal_id, tx_handler_period, admin_addr_id)
     else:
-        return res, None, (conn_creds, withdrawal_id, tx_handler_period, admin_addr_id)
+        return res, None, (withdrawal_id, tx_handler_period, admin_addr_id)
 
 
-async def withdraw_native(conn_creds,
+async def withdraw_native(provider,
                           withdrawal_address,
                           amount,
                           admin_private,
@@ -128,15 +132,16 @@ async def withdraw_native(conn_creds,
                           tx_handler_period,
                           admin_addr_id,
                           **_
-                          ):
+                          ) -> tuple[None, Exception, tuple[type, type, type]] | \
+                               tuple[type, None, tuple[type, type, type]]:
     amount = int(amount)
     try:
-        async with MyAsyncTron(*conn_creds) as client:
+        async with MyAsyncTron(provider) as client:
             res = await client.trx_transfer(withdrawal_address, amount, admin_private)
     except Exception as exc:
-        return None, exc, (conn_creds, withdrawal_id, tx_handler_period, admin_addr_id)
+        return None, exc, (withdrawal_id, tx_handler_period, admin_addr_id)
     else:
-        return res, None, (conn_creds, withdrawal_id, tx_handler_period, admin_addr_id)
+        return res, None, (withdrawal_id, tx_handler_period, admin_addr_id)
 
 
 async def notify_deposit(display_amount: str,
@@ -195,28 +200,27 @@ async def notify_withdrawal(display_amount: str,
         return resp, None, (withdrawal_id, callback_period)
 
 
-async def native_balance(conn_creds, addr_id, address) -> tuple[int, None, tuple[type, type, type]] | \
-                                                          tuple[None, Exception, tuple[type, type, type]]:
+async def native_balance(provider, addr_id, address) -> tuple[int, None, tuple[type, type]] | \
+                                                        tuple[None, Exception, tuple[type, type]]:
     try:
-        async with MyAsyncTron(*conn_creds) as client:
+        async with MyAsyncTron(provider) as client:
             res: int = await client.get_account_balance(address)
     except Exception as exc:
-        return None, exc, (conn_creds, addr_id, address)
+        return None, exc, (addr_id, address)
     else:
-        return res, None, (conn_creds, addr_id, address)
+        return res, None, (addr_id, address)
 
 
-async def trc20_balance(conn_creds, addr_id, contract_address, address: str) \
-        -> tuple[int, None, tuple[type, type, type]] | \
-           tuple[None, Exception, tuple[type, type, type]]:
+async def trc20_balance(provider, addr_id, contract_address, address: str) \
+        -> tuple[int, None, tuple[type, type]] | tuple[None, Exception, tuple[type, type]]:
     try:
-        async with MyAsyncTron(*conn_creds) as client:
+        async with MyAsyncTron(provider) as client:
             contract = TRC20(client, contract_address, abi_info=web3_utils.trc20_abi)
             res: int = await contract.balance_of(address)
     except Exception as exc:
-        return None, exc, (conn_creds, addr_id, contract_address)
+        return None, exc, (addr_id, contract_address)
     else:
-        return res, None, (conn_creds, addr_id, contract_address)
+        return res, None, (addr_id, contract_address)
 
 
 async def admin_approve_native_bal():
@@ -227,14 +231,13 @@ async def admin_approve_native_bal():
 
         if users:
             for addr_id, address in users:
-                conn_creds: list[tuple[str, str]] = await variables.api_keys_pool.get()
-                reqs.append(asyncio.create_task(native_balance(conn_creds, addr_id, address)))
+                provider = await variables.providers_pool.get()
+                reqs.append(asyncio.create_task(native_balance(provider, addr_id, address)))
 
             results = await asyncio.gather(*reqs)
 
             for balance, err, req_ident in results:
-                conn_creds, addr_id, address = req_ident
-                await variables.api_keys_pool.put(conn_creds)
+                addr_id, address = req_ident
                 if not err:
                     if balance <= variables.estimated_trc20_fee * Cfg.native_error_threshold:
                         common_logger.error(
@@ -258,8 +261,8 @@ async def admin_coins_bal():
                 for coin in coins:
                     contract_address: str = coin[Coins.contract_address.key]
                     if contract_address != St.native.v:
-                        conn_creds: list[tuple[str, str]] = await variables.api_keys_pool.get()
-                        reqs.append(asyncio.create_task(trc20_balance(conn_creds,
+                        provider = await variables.providers_pool.get()
+                        reqs.append(asyncio.create_task(trc20_balance(provider,
                                                                       addr_id,
                                                                       contract_address,
                                                                       address)))
@@ -267,8 +270,7 @@ async def admin_coins_bal():
             results = await asyncio.gather(*reqs)
 
             for balance, err, req_ident in results:
-                conn_creds, addr_id, contract_address = req_ident
-                await variables.api_keys_pool.put(conn_creds)
+                addr_id, contract_address = req_ident
                 if not err:
                     await db.upsert_balance(addr_id, contract_address, balance, commit=True)
                 elif not isinstance(err, httpx.HTTPStatusError):
@@ -283,11 +285,10 @@ async def update_in_memory_last_handled_block():
         block = await db.get_last_handled_block()
         if not block:
             if Cfg.start_block == "latest":
-                conn_creds: list[tuple[str, str]] = await variables.api_keys_pool.get()
-                async with MyAsyncTron(*conn_creds) as client:
+                provider = await variables.providers_pool.get()
+                async with MyAsyncTron(provider) as client:
                     block = await client.latest_block_number() - Cfg.block_offset
                     await db.insert_last_handled_block(block, commit=True)
-                await variables.api_keys_pool.put(conn_creds)
             else:
                 block = Cfg.start_block
                 await db.insert_last_handled_block(Cfg.start_block, commit=True)
@@ -296,12 +297,9 @@ async def update_in_memory_last_handled_block():
 
 
 async def get_trusted_block():
-    conn_creds = await variables.api_keys_pool.get()
-    try:
-        async with MyAsyncTron(*conn_creds) as client:
-            block = await client.latest_block_number() - Cfg.block_offset
-    finally:
-        await variables.api_keys_pool.put(conn_creds)
+    provider = await variables.providers_pool.get()
+    async with MyAsyncTron(provider) as client:
+        block = await client.latest_block_number() - Cfg.block_offset
     return block
 
 
@@ -432,56 +430,51 @@ async def native_txs_parser(block: dict, native_coin: dict):
 
 
 async def block_parser():
-    conn_creds_1 = await variables.api_keys_pool.get()
-    conn_creds_2 = await variables.api_keys_pool.get()
-    try:
-        async with MyAsyncTron(*conn_creds_1) as client1, MyAsyncTron(*conn_creds_2) as client2:
-            current_block = variables.last_handled_block + 1
+    provider = await variables.providers_pool.get()
+    async with MyAsyncTron(provider) as client:
+        current_block = variables.last_handled_block + 1
 
-            if variables.trusted_block - current_block < Cfg.block_offset * Cfg.allowed_slippage:
-                try:
-                    variables.trusted_block = await client1.latest_block_number() - Cfg.block_offset
-                except Exception as exc:
-                    if not isinstance(exc, httpx.HTTPStatusError):
-                        log_params = {"error": exc}
-                        common_logger.error(f"block_parser {log_params}")
-                    return
+        if variables.trusted_block - current_block < Cfg.block_offset * Cfg.allowed_slippage:
+            try:
+                variables.trusted_block = await client.latest_block_number() - Cfg.block_offset
+            except Exception as exc:
+                if not isinstance(exc, httpx.HTTPStatusError):
+                    log_params = {"error": exc}
+                    common_logger.error(f"block_parser {log_params}")
+                return
 
-            if variables.trusted_block > current_block:
+        if variables.trusted_block > current_block:
 
-                tasks = [asyncio.create_task(client1.get_txs_of_block(current_block)),
-                         asyncio.create_task(client2.get_entire_block(current_block))]
+            tasks = [asyncio.create_task(client.get_txs_of_block(current_block)),
+                     asyncio.create_task(client.get_entire_block(current_block))]
 
-                try:
-                    transactions, block = await asyncio.gather(*tasks)
-                except Exception as exc:
-                    if not isinstance(exc, httpx.HTTPStatusError):
-                        log_params = {"error": exc}
-                        common_logger.error(f"block_parser {log_params}")
-                else:
-                    async with write_async_session() as session:
-                        db = DB(session)
-                        resp = await db.get_coins(
-                            [Coins.contract_address, Coins.name, Coins.current_rate, Coins.min_amount,
-                             Coins.decimal])
+            try:
+                transactions, block = await asyncio.gather(*tasks)
+            except Exception as exc:
+                if not isinstance(exc, httpx.HTTPStatusError):
+                    log_params = {"error": exc}
+                    common_logger.error(f"block_parser {log_params}")
+            else:
+                async with write_async_session() as session:
+                    db = DB(session)
+                    resp = await db.get_coins(
+                        [Coins.contract_address, Coins.name, Coins.current_rate, Coins.min_amount,
+                         Coins.decimal])
 
-                        coins = {web3_utils.to_hex_address(coin[Coins.contract_address.key]): coin for coin in resp
-                                 if
-                                 coin[Coins.contract_address.key] != St.native.v}
-                        coin_txs = await coins_txs_parser(transactions, coins)
+                    coins = {web3_utils.to_hex_address(coin[Coins.contract_address.key]): coin for coin in resp
+                             if
+                             coin[Coins.contract_address.key] != St.native.v}
+                    coin_txs = await coins_txs_parser(transactions, coins)
 
-                        native_coin = [coin for coin in resp if coin[Coins.contract_address.key] == St.native.v][0]
-                        native_txs = await native_txs_parser(block, native_coin)
+                    native_coin = [coin for coin in resp if coin[Coins.contract_address.key] == St.native.v][0]
+                    native_txs = await native_txs_parser(block, native_coin)
 
-                        deposits = coin_txs + native_txs
+                    deposits = coin_txs + native_txs
 
-                        if deposits:
-                            await db.add_deposits(deposits)
-                        await db.insert_last_handled_block(current_block, commit=True)
-                        variables.last_handled_block = current_block
-    finally:
-        await variables.api_keys_pool.put(conn_creds_1)
-        await variables.api_keys_pool.put(conn_creds_2)
+                    if deposits:
+                        await db.add_deposits(deposits)
+                    await db.insert_last_handled_block(current_block, commit=True)
+                    variables.last_handled_block = current_block
 
 
 async def postpone_deposit_handling(db, deposit_id, tx_handler_period, address_id):
@@ -501,14 +494,13 @@ async def tx_conductor_native():
         deposits = await db.get_and_lock_pending_deposits_native()
         if deposits:
             for deposit in deposits:
-                conn_creds: list[tuple[str, str]] = await variables.api_keys_pool.get()
-                reqs.append(asyncio.create_task(native_transfer_to_admin(conn_creds=conn_creds, **deposit)))
+                provider = await variables.providers_pool.get()
+                reqs.append(asyncio.create_task(native_transfer_to_admin(provider=provider, **deposit)))
 
             results = await asyncio.gather(*reqs)
 
             for tx_hash, err, req_ident in results:
-                conn_creds, deposit_id, tx_handler_period, address_id = req_ident
-                await variables.api_keys_pool.put(conn_creds)
+                deposit_id, tx_handler_period, address_id = req_ident
                 if not err:
                     await db.update_user_address_by_id(address_id, {UserAddress.locked_by_tx.key: False}, commit=False)
                     await db.update_deposit_by_id(deposit_id, {Deposits.tx_hash_out.key: tx_hash,
@@ -526,23 +518,23 @@ async def tx_conductor_native():
                             common_logger.critical(f"tx_conductor_native unexpected error {log_params}")
 
 
-async def native_transfer_to_admin(conn_creds,
+async def native_transfer_to_admin(provider,
                                    deposit_id,
                                    amount,
                                    user_private,
                                    admin_public,
                                    tx_handler_period,
-                                   address_id) -> tuple[None, Exception, tuple[type, type, type, type]] | \
-                                                  tuple[type, None, tuple[type, type, type, type]]:
+                                   address_id) -> tuple[None, Exception, tuple[type, type, type]] | \
+                                                  tuple[type, None, tuple[type, type, type]]:
     amount = int(amount)
     amount_with_fee: int = amount - variables.estimated_native_fee
     try:
-        async with MyAsyncTron(*conn_creds) as client:
+        async with MyAsyncTron(provider) as client:
             res = await client.trx_transfer(admin_public, amount_with_fee, user_private)
     except Exception as exc:
-        return None, exc, (conn_creds, deposit_id, tx_handler_period, address_id)
+        return None, exc, (deposit_id, tx_handler_period, address_id)
     else:
-        return res, None, (conn_creds, deposit_id, tx_handler_period, address_id)
+        return res, None, (deposit_id, tx_handler_period, address_id)
 
 
 async def tx_conductor_coin():
@@ -553,14 +545,13 @@ async def tx_conductor_coin():
 
         if deposits:
             for deposit in deposits:
-                conn_creds: list[tuple[str, str]] = await variables.api_keys_pool.get()
-                reqs.append(asyncio.create_task(coin_transfer_to_admin(conn_creds=conn_creds, **deposit)))
+                provider = await variables.providers_pool.get()
+                reqs.append(asyncio.create_task(coin_transfer_to_admin(provider=provider, **deposit)))
 
             results = await asyncio.gather(*reqs)
 
             for tx_hash, err, req_ident in results:
-                conn_creds, deposit_id, tx_handler_period, approve_id, address_id = req_ident
-                await variables.api_keys_pool.put(conn_creds)
+                deposit_id, tx_handler_period, approve_id, address_id = req_ident
 
                 await db.update_user_address_by_id(approve_id, {UserAddress.locked_by_tx.key: False}, commit=False)
 
@@ -590,17 +581,16 @@ async def withdraw_handler():
         if withdrawals:
             for withdrawal in withdrawals:
                 contract_address = withdrawal[Withdrawals.contract_address.key]
-                conn_creds: list[tuple[str, str]] = await variables.api_keys_pool.get()
+                provider = await variables.providers_pool.get()
                 if contract_address == St.native.v:
-                    reqs.append(asyncio.create_task(withdraw_native(conn_creds, **withdrawal)))
+                    reqs.append(asyncio.create_task(withdraw_native(provider, **withdrawal)))
                 else:
-                    reqs.append(asyncio.create_task(withdraw_coin(conn_creds, **withdrawal)))
+                    reqs.append(asyncio.create_task(withdraw_coin(provider, **withdrawal)))
 
             results = await asyncio.gather(*reqs)
 
             for tx_hash, err, req_ident in results:
-                conn_creds, withdrawal_id, tx_handler_period, adm_address_id = req_ident
-                await variables.api_keys_pool.put(conn_creds)
+                withdrawal_id, tx_handler_period, adm_address_id = req_ident
                 if not err:
                     await db.update_user_address_by_id(adm_address_id, {UserAddress.locked_by_tx.key: False},
                                                        commit=False)
