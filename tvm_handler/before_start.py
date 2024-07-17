@@ -4,11 +4,13 @@ import asyncio
 import uuid
 from sqlalchemy import text, exc as sqlalchemy_exc
 
-from misc import startup_logger, SharedVariables
+from misc import SharedVariables, get_logger
 from config import Config as Cfg, StatCode as St
 from db.database import DB, write_async_session, engine
 from db.models import Base, Coins
 from web3_client import utils
+
+startup_logger = get_logger("startup_logger")
 
 
 async def create_models():
@@ -25,7 +27,7 @@ async def insert_users(mnemonic, count_users, role, offset):
         keys = utils.keys_from_mnemonic(mnemonic, count_users, offset)
         ret = []
         for i in range(count_users):
-            print(St(role), keys[i].public_key.to_base58check_address(), keys[i].hex())
+            print(St(role), keys[i].public_key.to_base58check_address())
             try:
                 user_id = uuid.uuid4().hex
                 await db.add_account(user_id, None, None, keys[i].public_key.to_base58check_address(), keys[i].hex(),

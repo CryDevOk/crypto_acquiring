@@ -3,7 +3,7 @@
 from db.database import DB, write_async_session, read_async_session
 from db.models import NetworkHandlers
 from config import Config as Cfg, StatCode as St
-from misc import get_logger
+from misc import get_logger, std_logger
 
 from sqlalchemy import exc as sqlalchemy_exc
 from fastapi.responses import JSONResponse
@@ -13,9 +13,21 @@ import asyncio
 from decimal import Decimal
 import os
 from uuid import uuid4
+import traceback
 
 app = FastAPI()
 route_logger = get_logger("route_logger")
+
+
+async def catch_exceptions_middleware(request: Request, call_next):
+    try:
+        return await call_next(request)
+    except Exception:
+        std_logger.critical(traceback.format_exc())
+        return JSONResponse({"error": "Service temporary unavailable"}, 503)
+
+
+app.middleware('http')(catch_exceptions_middleware)
 
 
 def json_success_response(data: dict, status_code: int) -> Response:
@@ -51,10 +63,17 @@ async def get_withdraw_info_by_handler(user_id: str,
         return name, resp, None
 
 
-async def verify_customer(customer_id, customer_api_key, user_id=None):
+async def verify_customer(customer_id, customer_api_key) -> bool:
     async with read_async_session() as session:
         db = DB(session, route_logger)
-        result: bool = await db.verify_customer(customer_id, customer_api_key, user_id)
+        result: bool = await db.verify_customer(customer_id, customer_api_key)
+    return result
+
+
+async def verify_customer_and_user(customer_id, customer_api_key, user_id) -> tuple[bool, bool]:
+    async with read_async_session() as session:
+        db = DB(session, route_logger)
+        result = await db.verify_customer_and_user(customer_id, customer_api_key, user_id)
     return result
 
 
@@ -86,6 +105,37 @@ async def add_customer(request: Request):
                 else:
                     await session.commit()
                     return json_success_response({"customer_id": customer_id, "api_key": api_key}, 200)
+        else:
+            return json_error_response("Wrong Api-Key", 401)
+
+
+@app.post(f"/v1/api/private/user/update_customer_by_callback_url")
+async def update_customer_by_callback_url(request: Request):
+    input_data = await request.json()
+    try:
+        callback_url = input_data["callback_url"]
+        callback_api_key = input_data.get("callback_api_key")
+        api_key = input_data.get("api_key")
+        assert callback_api_key or api_key, "at least one of the fields must be filled"
+    except KeyError:
+        return json_error_response("Not enough or wrong arguments", 400)
+    else:
+        if request.headers.get("Api-Key") == Cfg.PROC_API_KEY:
+            async with read_async_session() as session:
+                db = DB(session, route_logger)
+                data_to_update = {}
+                if callback_api_key:
+                    data_to_update["callback_api_key"] = callback_api_key
+                if api_key:
+                    data_to_update["api_key"] = api_key
+
+                try:
+                    resp = await db.update_customer_by_callback_url(callback_url, data_to_update)
+                except Exception as exc:
+                    route_logger.critical(f"Unexpected error: {exc}")
+                    return json_error_response("Service temporary unavailable", 503)
+                else:
+                    return json_success_response({"customer_id": resp["id"], "api_key": api_key}, 200)
         else:
             return json_error_response("Wrong Api-Key", 401)
 
@@ -213,43 +263,48 @@ async def get_withdraw_info(request: Request):
     except (KeyError, AssertionError, ValueError):
         return json_error_response("Not enough or wrong arguments", 400)
     else:
-        if await verify_customer(customer_id, customer_api_key, user_id):
-            async with read_async_session() as session:
-                db = DB(session, route_logger)
-                if tx_handler:
-                    resp = await db.get_tx_handler(tx_handler,
-                                                   [NetworkHandlers.name,
-                                                    NetworkHandlers.server_url,
-                                                    NetworkHandlers.api_key])
-                    resp = [resp]
-                else:
-                    resp = await db.get_handlers([NetworkHandlers.name,
-                                                  NetworkHandlers.server_url,
-                                                  NetworkHandlers.api_key])
+        customer_verified, user_verified = await verify_customer_and_user(customer_id, customer_api_key, user_id)
 
-                tasks = []
-                for name, server_url, api_key in resp:
-                    tasks.append(asyncio.create_task(get_withdraw_info_by_handler(user_id,
-                                                                                  str(quote_amount),
-                                                                                  name,
-                                                                                  server_url,
-                                                                                  api_key)
-                                                     )
-                                 )
-
-                results = await asyncio.gather(*tasks)
-                output_data = {}
-
-                for name, resp, exc in results:
-                    if exc:
-                        route_logger.error(f"get_withdraw_info: tx_handler error {exc}")
+        if customer_verified:
+            if user_verified:
+                async with read_async_session() as session:
+                    db = DB(session, route_logger)
+                    if tx_handler:
+                        resp = await db.get_tx_handler(tx_handler,
+                                                       [NetworkHandlers.name,
+                                                        NetworkHandlers.server_url,
+                                                        NetworkHandlers.api_key])
+                        resp = [resp]
                     else:
-                        output_data[name] = resp
+                        resp = await db.get_handlers([NetworkHandlers.name,
+                                                      NetworkHandlers.server_url,
+                                                      NetworkHandlers.api_key])
 
-                if tx_handler:
-                    return json_success_response(output_data[tx_handler], 200)
-                else:
-                    return json_success_response(output_data, 200)
+                    tasks = []
+                    for name, server_url, api_key in resp:
+                        tasks.append(asyncio.create_task(get_withdraw_info_by_handler(user_id,
+                                                                                      str(quote_amount),
+                                                                                      name,
+                                                                                      server_url,
+                                                                                      api_key)
+                                                         )
+                                     )
+
+                    results = await asyncio.gather(*tasks)
+                    output_data = {}
+
+                    for name, resp, exc in results:
+                        if exc:
+                            route_logger.error(f"get_withdraw_info: tx_handler error {exc}")
+                        else:
+                            output_data[name] = resp
+
+                    if tx_handler:
+                        return json_success_response(output_data[tx_handler], 200)
+                    else:
+                        return json_success_response(output_data, 200)
+            else:
+                return json_error_response("User not found", 404)
         else:
             return json_error_response("Wrong Api-Key", 401)
 
@@ -266,27 +321,33 @@ async def get_deposit_info(request: Request):
     except KeyError:
         return json_error_response("Not enough or wrong arguments", 400)
     else:
-        if await verify_customer(customer_id, customer_api_key, user_id):
-            async with read_async_session() as session:
-                db = DB(session, route_logger)
-                resp = await db.get_handlers([NetworkHandlers.name,
-                                              NetworkHandlers.server_url,
-                                              NetworkHandlers.api_key])
-                tasks = []
-                for name, server_url, api_key in resp:
-                    tasks.append(asyncio.create_task(get_deposit_info_by_handler(user_id, name, server_url, api_key)))
+        customer_verified, user_verified = await verify_customer_and_user(customer_id, customer_api_key, user_id)
 
-                results = await asyncio.gather(*tasks)
+        if customer_verified:
+            if user_verified:
+                async with read_async_session() as session:
+                    db = DB(session, route_logger)
+                    resp = await db.get_handlers([NetworkHandlers.name,
+                                                  NetworkHandlers.server_url,
+                                                  NetworkHandlers.api_key])
+                    tasks = []
+                    for name, server_url, api_key in resp:
+                        tasks.append(
+                            asyncio.create_task(get_deposit_info_by_handler(user_id, name, server_url, api_key)))
 
-                output_data = {}
+                    results = await asyncio.gather(*tasks)
 
-                for name, resp, exc in results:
-                    if exc:
-                        route_logger.error(f"get_deposit_info: tx_handler error {exc}")
-                    else:
-                        output_data[name] = resp
+                    output_data = {}
 
-                return json_success_response(output_data, 200)
+                    for name, resp, exc in results:
+                        if exc:
+                            route_logger.error(f"get_deposit_info: tx_handler error {exc}")
+                        else:
+                            output_data[name] = resp
+
+                    return json_success_response(output_data, 200)
+            else:
+                return json_error_response("User not found", 404)
         else:
             return json_error_response("Wrong Api-Key", 401)
 
@@ -309,26 +370,31 @@ async def create_withdrawal(request: Request):
     except (ValueError, AssertionError, KeyError):
         return json_error_response("Not enough or wrong arguments", 400)
     else:
-        if await verify_customer(customer_id, customer_api_key, user_id):
-            async with write_async_session() as session:
-                db = DB(session, route_logger)
-                server_url, api_key = await db.get_tx_handler(tx_handler,
-                                                              [NetworkHandlers.server_url, NetworkHandlers.api_key])
-                client = handler_api_client.Client(server_url, api_key)
-                try:
-                    await client.create_withdrawal(user_id=user_id,
-                                                   contract_address=contract_address,
-                                                   address=address,
-                                                   quote_amount=quote_amount,
-                                                   user_currency=user_currency)
-                except handler_api_client.ClientException as exc:
-                    route_logger.error(f"Error: {exc}")
-                    return json_error_response("Service temporary unavailable", 503)
-                except Exception as exc:
-                    route_logger.critical(f"Error: {exc}")
-                    return json_error_response("Service temporary unavailable", 503)
-                else:
-                    return json_success_response({}, 200)
+        customer_verified, user_verified = await verify_customer_and_user(customer_id, customer_api_key, user_id)
+
+        if customer_verified:
+            if user_verified:
+                async with write_async_session() as session:
+                    db = DB(session, route_logger)
+                    server_url, api_key = await db.get_tx_handler(tx_handler,
+                                                                  [NetworkHandlers.server_url, NetworkHandlers.api_key])
+                    client = handler_api_client.Client(server_url, api_key)
+                    try:
+                        await client.create_withdrawal(user_id=user_id,
+                                                       contract_address=contract_address,
+                                                       address=address,
+                                                       quote_amount=quote_amount,
+                                                       user_currency=user_currency)
+                    except handler_api_client.ClientException as exc:
+                        route_logger.error(f"Error: {exc}")
+                        return json_error_response("Service temporary unavailable", 503)
+                    except Exception as exc:
+                        route_logger.critical(f"Error: {exc}")
+                        return json_error_response("Service temporary unavailable", 503)
+                    else:
+                        return json_success_response({}, 200)
+            else:
+                return json_error_response("User not found", 404)
         else:
             return json_error_response("Wrong Api-Key", 401)
 
