@@ -23,5 +23,5 @@ def test_behavior(input_data, expected_status_code, expected_response):
 
     if response.status_code == 200:
         account = Account(user_id)
-        account.save_to_file(account)
+        account.save_to_file()
         print(account)

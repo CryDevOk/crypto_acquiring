@@ -33,6 +33,6 @@ def test_behavior(input_data, expected_status_code, expected_response):
                 assert "is_active" in v_ and isinstance(v_["is_active"], bool)
 
         account.deposit_info = DepositInfo.load_from_dict(data["tron_nile"])
-        account.save_to_file(account)
+        account.save_to_file()
 
 
