@@ -562,3 +562,33 @@ class DB(object):
             return [array_prepare_to_json(columns, row) for row in data]
         else:
             return [array_to_dict(columns, row) for row in data]
+
+    async def get_admin_balances(self) -> List[dict]:
+        columns = [Balances.balance, Balances.coin_id, Balances.address_id, Users.role]
+        stmt = select()
+        stmt = stmt.join(UserAddress, UserAddress.id == Balances.address_id)
+        stmt = stmt.join(Users, Users.id == UserAddress.user_id)
+        stmt = stmt.where(Users.role.in_(St.SADMIN.v, St.APPROVE.v))
+        resp = await self.session.execute(stmt)
+        data = resp.fetchall()
+        return [array_to_dict(columns, row) for row in data]
+
+    async def get_pending_deposits(self, for_json=False) -> List[dict]:
+        columns = [Deposits.id, Deposits.address_id, Deposits.contract_address, Deposits.amount, Deposits.tx_hash_in]
+        stmt = select(*columns).where(Deposits.tx_hash_out.is_(None))
+        resp = await self.session.execute(stmt)
+        data = resp.fetchall()
+        if for_json:
+            return [array_prepare_to_json(columns, row) for row in data]
+        else:
+            return [array_to_dict(columns, row) for row in data]
+
+    async def get_pending_withdrawals(self, for_json=False) -> List[dict]:
+        columns = [Withdrawals.id, Withdrawals.user_id, Withdrawals.contract_address, Withdrawals.amount, Withdrawals.tx_hash_out]
+        stmt = select(*columns).where(Withdrawals.tx_hash_out.is_(None))
+        resp = await self.session.execute(stmt)
+        data = resp.fetchall()
+        if for_json:
+            return [array_prepare_to_json(columns, row) for row in data]
+        else:
+            return [array_to_dict(columns, row) for row in data]

@@ -8,7 +8,7 @@ from fastapi import FastAPI
 import traceback
 
 from db.database import DB, write_async_session, read_async_session
-from db.models import Coins, Users
+from db.models import Coins, Users, Balances
 from config import Config as Cfg, StatCode as St
 from misc import get_logger, \
     quote_amount_to_amount, \
@@ -247,6 +247,44 @@ async def create_withdrawal(request: Request):
                     return json_success_response(output_data, 200)
         else:
             return json_error_response("Wrong Api-Key", 401)
+
+
+@app.get("/admin/balances")
+async def admin_balances(request: Request):
+    if request.headers.get("Api-Key") == Cfg.PROC_HANDLER_API_KEY:
+        async with read_async_session() as session:
+            db = DB(session, route_logger)
+            resp = await db.get_admin_balances()
+            balances = {}
+            for balance in resp:
+                address_id = balances.setdefault(balance[Balances.address_id.key],
+                                                 {Users.role.key: balance[Users.role.key], "balances": {}})
+                address_id[Balances.coin_id.key]["balances"] = balance[Balances.balance.key]
+            return json_success_response(resp, 200)
+    else:
+        return json_error_response("Wrong Api-Key", 401)
+
+
+@app.get("/deposit/pending")
+async def deposit_total(request: Request):
+    if request.headers.get("Api-Key") == Cfg.PROC_HANDLER_API_KEY:
+        async with read_async_session() as session:
+            db = DB(session, route_logger)
+            resp = await db.get_pending_deposits(for_json=True)
+            return json_success_response(resp, 200)
+    else:
+        return json_error_response("Wrong Api-Key", 401)
+
+
+@app.get("/withdrawal/pending")
+async def deposit_total(request: Request):
+    if request.headers.get("Api-Key") == Cfg.PROC_HANDLER_API_KEY:
+        async with read_async_session() as session:
+            db = DB(session, route_logger)
+            resp = await db.get_pending_withdrawals(for_json=True)
+            return json_success_response(resp, 200)
+    else:
+        return json_error_response("Wrong Api-Key", 401)
 
 
 @app.get("/readiness")
