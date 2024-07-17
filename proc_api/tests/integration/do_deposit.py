@@ -52,7 +52,7 @@ def coin_deposit(account, amount):
 
 if __name__ == "__main__":
     import random
-    for account in accounts[:2]:
+    for account in accounts:
         trx_deposit(account, random.randint(1_000_000, 10_000_000))
         coin_deposit(account, random.randint(1_000_000, 10_000_000))
         account.append_to_file()
