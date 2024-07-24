@@ -22,6 +22,12 @@ from datetime import datetime, timedelta, timezone
 import httpx
 import traceback
 
+variables = SharedVariables()
+startup_logger = get_logger("startup_logger")
+providers_api_logger = get_logger("providers_api_logger")
+callback_logger = get_logger("callback_logger")
+common_logger = get_logger("common_logger")
+
 
 class PreparingTransactionError(Exception):
     def __init__(self, original_error, message):
@@ -850,9 +856,4 @@ async def main():
 
 
 if __name__ == '__main__':
-    variables = SharedVariables()
-    startup_logger = get_logger("startup_logger")
-    providers_api_logger = get_logger("providers_api_logger")
-    callback_logger = get_logger("callback_logger")
-    common_logger = get_logger("common_logger")
     asyncio.run(main())
