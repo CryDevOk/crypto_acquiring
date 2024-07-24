@@ -56,7 +56,22 @@ class Config(object):
     READ_DSN = os.environ.get("PROC_HANDLER_READ_DSN")
     DB_SECRET_KEY = os.environ.get("PROC_HANDLER_DB_SECRET_KEY").encode()
 
-    grpc_server = os.environ.get("PROC_HANDLER_PROVIDER_URL")
+    getblock_server = os.environ.get("PROC_HANDLER_PROVIDER_GETBLOCK_URL")
+    getblock_api_keys = os.environ.get("PROC_HANDLER_GETBLOCK_API_KEYS")
+    if getblock_api_keys:
+        getblock_api_keys = getblock_api_keys.split(",")
+        assert getblock_server, "PROC_HANDLER_PROVIDER_GETBLOCK_URL must be set if PROC_HANDLER_GETBLOCK_API_KEYS has been set"
+    else:
+        getblock_api_keys = []
+
+    infura_server = os.environ.get("PROC_HANDLER_PROVIDER_INFURA_URL")
+    infura_api_key_keys = os.environ.get("PROC_HANDLER_INFURA_API_KEYS")
+    if infura_api_key_keys:
+        infura_api_key_keys = infura_api_key_keys.split(",")
+        assert infura_server, "PROC_HANDLER_PROVIDER_INFURA_URL must be set if PROC_HANDLER_INFURA_API_KEYS has been set"
+    else:
+        infura_api_key_keys = []
+
     scanner_url = os.environ.get("PROC_HANDLER_SCANNER_URL")
     config_coins = os.environ.get("PROC_HANDLER_COINS")
 
@@ -69,7 +84,7 @@ class Config(object):
     PROC_API_KEY = os.environ.get("PROC_API_KEY")
 
     assert network_name is not None, "PROC_HANDLER_NETWORK_NAME must be set"
-    assert validators.url(grpc_server), "PROC_HANDLER_PROVIDER_URL must be a valid URL"
+    assert validators.url(getblock_server), "PROC_HANDLER_PROVIDER_URL must be a valid URL"
     assert validators.url(scanner_url), "PROC_HANDLER_SCANNER_URL must be a valid URL"
 
     if start_block != "latest":
@@ -81,7 +96,7 @@ class Config(object):
     approve_accounts = 4
 
     allowed_slippage = 2
-    block_offset = 2
+    block_offset = 3
     min_admin_address_native_balance = 50 * (10 ** 6)
 
     WRITE_POOL_SIZE = 10
@@ -91,3 +106,4 @@ class Config(object):
     quote_decimal_factor = 1
 
     native_warning_threshold = 10  # count of transaction that can wallet handle before it's balance will be low
+    native_error_threshold = 2  # count of transaction that can wallet handle before it's balance will be critical

@@ -5,20 +5,36 @@ from fastapi.responses import JSONResponse
 from fastapi import Response, Request
 from decimal import Decimal
 from fastapi import FastAPI
-from typing import List, Dict, Union
+import traceback
 
 from db.database import DB, write_async_session, read_async_session
-from db.models import Coins, User
+from db.models import Coins, Users, Balances
 from config import Config as Cfg, StatCode as St
-from misc import get_logger, quote_amount_to_amount, get_round_for_rate, amount_to_display, amount_to_quote_amount
+from misc import get_logger, \
+    quote_amount_to_amount, \
+    get_round_for_rate, \
+    amount_to_display, \
+    amount_to_quote_amount, \
+    std_logger
 from web3_client import utils
 
 app = FastAPI()
-bd_logger = get_logger("restapi_bd_logger")
+bd_logger = get_logger("bd_logger")
 route_logger = get_logger("route_logger")
 
 
-def json_success_response(data: Union[dict, list], status_code: int) -> Response:
+async def catch_exceptions_middleware(request: Request, call_next):
+    try:
+        return await call_next(request)
+    except Exception:
+        std_logger.critical(traceback.format_exc())
+        return JSONResponse({"error": "Service temporary unavailable"}, 503)
+
+
+app.middleware('http')(catch_exceptions_middleware)
+
+
+def json_success_response(data: dict | list, status_code: int) -> Response:
     return JSONResponse(data, status_code)
 
 
@@ -120,7 +136,7 @@ async def get_withdraw_info(request: Request):
         if request.headers.get("Api-Key") == Cfg.PROC_HANDLER_API_KEY:
             async with read_async_session() as session:
                 db = DB(session, route_logger)
-                user = await db.get_user_by_id(user_id, [User.id])
+                user = await db.get_user_by_id(user_id, [Users.id])
                 if user:
                     resp = await db.get_coins([Coins.contract_address,
                                                Coins.name,
@@ -178,11 +194,16 @@ async def get_deposit_info(request: Request):
                                                Coins.name,
                                                Coins.decimal,
                                                Coins.min_amount,
-                                               Coins.is_active], for_json=True)
+                                               Coins.current_rate,
+                                               Coins.is_active], for_json=False)
                     coins = {}
                     min_amount: Decimal
                     for coin in resp:
                         contract_address = coin.pop(Coins.contract_address.key)
+                        rounding: Decimal = get_round_for_rate(coin.pop(Coins.current_rate.key))
+                        coin[Coins.min_amount.key] = amount_to_display(coin[Coins.min_amount.key],
+                                                                       coin[Coins.decimal.key],
+                                                                       rounding)
                         coins[contract_address] = coin
                     output_data = {"address": address, "display_name": Cfg.PROC_HANDLER_DISPLAY, "coins": coins}
                     return json_success_response(output_data, 200)
@@ -226,6 +247,44 @@ async def create_withdrawal(request: Request):
                     return json_success_response(output_data, 200)
         else:
             return json_error_response("Wrong Api-Key", 401)
+
+
+@app.get("/admin/balances")
+async def admin_balances(request: Request):
+    if request.headers.get("Api-Key") == Cfg.PROC_HANDLER_API_KEY:
+        async with read_async_session() as session:
+            db = DB(session, route_logger)
+            resp = await db.get_admin_balances()
+            balances = {}
+            for balance in resp:
+                address_id = balances.setdefault(balance[Balances.address_id.key],
+                                                 {Users.role.key: balance[Users.role.key], "balances": {}})
+                address_id[Balances.coin_id.key]["balances"] = balance[Balances.balance.key]
+            return json_success_response(resp, 200)
+    else:
+        return json_error_response("Wrong Api-Key", 401)
+
+
+@app.get("/deposit/pending")
+async def deposit_total(request: Request):
+    if request.headers.get("Api-Key") == Cfg.PROC_HANDLER_API_KEY:
+        async with read_async_session() as session:
+            db = DB(session, route_logger)
+            resp = await db.get_pending_deposits(for_json=True)
+            return json_success_response(resp, 200)
+    else:
+        return json_error_response("Wrong Api-Key", 401)
+
+
+@app.get("/withdrawal/pending")
+async def deposit_total(request: Request):
+    if request.headers.get("Api-Key") == Cfg.PROC_HANDLER_API_KEY:
+        async with read_async_session() as session:
+            db = DB(session, route_logger)
+            resp = await db.get_pending_withdrawals(for_json=True)
+            return json_success_response(resp, 200)
+    else:
+        return json_error_response("Wrong Api-Key", 401)
 
 
 @app.get("/readiness")

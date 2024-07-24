@@ -18,6 +18,7 @@ from web3_client.exceptions import Web3Exception, \
     AlreadyKnown, \
     UnderpricedTransaction, \
     InsufficientFundsForTx, \
+    ProviderConnectionErrorOnTx, \
     TransactionFailed
 from web3_client.utils import generate_mnemonic, keys_from_mnemonic, erc20_abi
 
@@ -26,28 +27,30 @@ def hex_to_int(hex_str):
     return int(hex_str, 16)
 
 
-class AsyncEth():
-    def __init__(self, server, network_id):
-        self.server = server
+class MyAsyncEth:
+    def __init__(self, provider, network_id):
         self.client = None
         self.network_id = network_id
-        self.provider = None
+        self.provider: AsyncHTTPProvider = provider
 
     async def __aenter__(self):
-        self.provider = AsyncHTTPProvider(self.server)
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.provider.client.aclose()
 
     async def result(self, tx_hash):
-        await self.wait_for_mempool(tx_hash)
-        await self.wait_for_mined(tx_hash)
-        receipt = await self.wait_for_receipt(tx_hash)
-        if receipt.get("status") == '0x1':
-            return tx_hash
+        try:
+            await self.wait_for_mempool(tx_hash)
+            await self.wait_for_mined(tx_hash)
+            receipt = await self.wait_for_receipt(tx_hash)
+        except httpx.HTTPError as exc:
+            raise ProviderConnectionErrorOnTx(tx_hash) from exc
         else:
-            raise TransactionFailed(tx_hash=tx_hash)
+            if receipt.get("status") == '0x1':
+                return tx_hash
+            else:
+                raise TransactionFailed(tx_hash=tx_hash)
 
     async def broadcast_and_wait_result(self, txn):
         try:
@@ -88,7 +91,7 @@ class AsyncEth():
         while time.time() < end_time:
             try:
                 return await self.is_transaction_mined(tx_hash)
-            except (Web3Exception, StuckTransaction, httpx.HTTPError, httpx.HTTPStatusError):
+            except (Web3Exception, StuckTransaction, httpx.HTTPError, httpx.HTTPStatusError, TransactionNotFound):
                 await asyncio.sleep(interval)
         return await self.is_transaction_mined(tx_hash)
 
@@ -97,14 +100,17 @@ class AsyncEth():
         while time.time() < end_time:
             try:
                 return await self.get_transaction_receipt(tx_hash)
-            except (httpx.HTTPError, httpx.HTTPStatusError):
+            except (httpx.HTTPError, httpx.HTTPStatusError, TransactionNotFound):
                 await asyncio.sleep(interval)
         return await self.get_transaction_receipt(tx_hash)
 
     async def get_transaction_receipt(self, tx_hash) -> dict:
         res = await self.provider.make_request("", {"jsonrpc": "2.0", "method": "eth_getTransactionReceipt",
                                                     "params": [tx_hash], "id": 1})
-        return res["result"]
+        if res["result"] is None:
+            raise TransactionNotFound(tx_hash)
+        else:
+            return res["result"]
 
     async def get_transaction_by_hash(self, tx_hash) -> dict:
         res = await self.provider.make_request("", {"jsonrpc": "2.0", "method": "eth_getTransactionByHash",
@@ -171,7 +177,7 @@ class AsyncEth():
 
 
 class AsyncContract():
-    def __init__(self, client: AsyncEth, contract_address: str, abi_info):
+    def __init__(self, client: MyAsyncEth, contract_address: str, abi_info):
         self.client = client
         self.contract_address = eth_utils.to_checksum_address(contract_address)
         self.abi_info = abi_info
@@ -198,7 +204,6 @@ class AsyncContract():
         method = getattr(self.contract_obj.functions, method_name)
         txb = method(*args)
         txb = txb.build_transaction(tx_data)
-
         txn = account.sign_transaction(txb)
         return await self.client.broadcast_and_wait_result(txn)
 
@@ -236,7 +241,7 @@ class ERC20(AsyncContract):
         return resp[0]
 
 
-async def distribute_eth(client: AsyncEth, accounts: List[eth_account.account.LocalAccount], amount: int,
+async def distribute_eth(client: MyAsyncEth, accounts: List[eth_account.account.LocalAccount], amount: int,
                          priv_key: str):
     gas_price = int((await client.gas_price()) * 1.5)
     for acc in accounts:
@@ -244,7 +249,7 @@ async def distribute_eth(client: AsyncEth, accounts: List[eth_account.account.Lo
         print(resp)
 
 
-async def distribute_erc20(client: AsyncEth,
+async def distribute_erc20(client: MyAsyncEth,
                            accounts: List[eth_account.account.LocalAccount],
                            amount: int,
                            priv_key: str,
@@ -257,6 +262,7 @@ async def distribute_erc20(client: AsyncEth,
 
 
 async def prepare_new_accounts():
+    from web3_client.providers import AsyncInfuraHTTPProvider, AsyncGetblockHTTPProvider, ProviderCaller
     address_count: int = 4
     eth_amount = 0.1
     wei_amount = int(eth_amount * 10 ** 18)
@@ -264,14 +270,26 @@ async def prepare_new_accounts():
     priv_key = ""
     contract_address = ""
     network_id = 11155111
-    provider_url = ""
+    provider = ProviderCaller(AsyncInfuraHTTPProvider, "https://sepolia.infura.io/v3", "")()
+    # provider = ProviderCaller(AsyncGetblockHTTPProvider, "https://go.getblock.io/", "")()
 
     mnem = generate_mnemonic()
-    print(mnem)
+    # print(mnem)
     accounts = keys_from_mnemonic(mnem, address_count)
-    async with AsyncEth(provider_url, network_id) as client:
-        await distribute_eth(client, accounts, wei_amount, priv_key)
-        await distribute_erc20(client, accounts, coin_amount, priv_key, contract_address)
+    async with MyAsyncEth(provider, network_id) as client:
+        contract = ERC20(client, contract_address, erc20_abi)
+        # gas_price = int((await client.gas_price()) * 1.5)
+        # amount = int(0.01 * 10 ** 18)
+        # r = await client.wait_for_receipt("")
+        # print(r)
+        # resp = await client.send_ether("", amount, priv_key, gas_price=gas_price, gas=21000)
+        # print(resp)
+        # block_number = await client.latest_block_number()
+        # print(block_number)
+        # r = await client.get_block_by_number(eth_utils.to_hex(block_number))
+        # print(r)
+        # await distribute_eth(client, accounts, wei_amount, priv_key)
+        # await distribute_erc20(client, accounts, coin_amount, priv_key, contract_address)
 
 
 if __name__ == "__main__":
