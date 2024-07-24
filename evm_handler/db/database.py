@@ -323,9 +323,9 @@ class DB(object):
                     .distinct(Deposits.address_id)
                     .where(and_(
             Deposits.contract_address == St.native.v,
-            Deposits.locked_by_tx_handler.is_(False),
+            Deposits.locked_by_tx_handler == False,
             Deposits.time_to_tx_handler < func.NOW(),
-            user.locked_by_tx.is_(False)
+            user.locked_by_tx == False
         )
         )
                     .join(user, user.id == Deposits.address_id)
@@ -390,9 +390,9 @@ class DB(object):
                     .distinct(Deposits.address_id)
                     .where(and_(
             Deposits.contract_address != St.native.v,
-            Deposits.locked_by_tx_handler.is_(False),
+            Deposits.locked_by_tx_handler == False,
             Deposits.time_to_tx_handler < func.NOW(),
-            approve.locked_by_tx.is_(False),
+            approve.locked_by_tx == False,
         )
         )
                     .join(user, user.id == Deposits.address_id)
@@ -473,7 +473,7 @@ class DB(object):
                         Withdrawals.contract_address == Balances.coin_id,
                         Withdrawals.amount < Balances.balance,
                         Users.role == St.SADMIN.v,
-                        UserAddress.locked_by_tx.is_(False)
+                        UserAddress.locked_by_tx == False
                         )
                    ).limit(count_admins).with_for_update()
         )

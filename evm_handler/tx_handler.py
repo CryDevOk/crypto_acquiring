@@ -573,19 +573,21 @@ async def native_transfer_to_admin_on_provider_err(provider,
 
 
 async def coin_transfer_to_admin_on_provider_err(provider,
+                                                 deposit_id,
                                                  approve_id,
                                                  tx_handler_period,
                                                  address_id,
                                                  tx_hash_out,
+
                                                  **_) -> tuple[None, Exception, tuple[type, type, type, type, str]] | \
                                                          tuple[type, None, tuple[type, type, type, type, None]]:
     try:
         async with MyAsyncEth(provider, Cfg.network_id) as client:
             await client.result(tx_hash_out)
     except Exception as exc:
-        return None, exc, (approve_id, tx_handler_period, address_id, tx_hash_out, traceback.format_exc())
+        return None, exc, (deposit_id, tx_handler_period, approve_id, address_id, traceback.format_exc())
     else:
-        return tx_hash_out, None, (approve_id, tx_handler_period, address_id, tx_hash_out, None)
+        return tx_hash_out, None, (deposit_id, tx_handler_period, approve_id, address_id, None)
 
 
 async def tx_conductor_native():
@@ -611,8 +613,7 @@ async def tx_conductor_native():
                 deposit_id, tx_handler_period, address_id, tb = req_ident
                 if not err:
                     await db.update_user_address_by_id(address_id, {UserAddress.locked_by_tx.key: False}, commit=False)
-                    await db.update_deposit_by_id(deposit_id, {Deposits.tx_hash_out.key: tx_hash,
-                                                               Deposits.locked_by_tx_handler.key: False}, commit=True)
+                    await db.update_deposit_by_id(deposit_id, {Deposits.tx_hash_out.key: tx_hash}, commit=True)
                 else:
                     log_params = {"deposit_id": deposit_id,
                                   "tx_handler_period": tx_handler_period,
@@ -658,8 +659,7 @@ async def tx_conductor_coin():
 
                 if not err:
                     await db.update_user_address_by_id(address_id, {UserAddress.locked_by_tx.key: False}, commit=False)
-                    await db.update_deposit_by_id(deposit_id, {Deposits.tx_hash_out.key: tx_hash,
-                                                               Deposits.locked_by_tx_handler.key: False}, commit=True)
+                    await db.update_deposit_by_id(deposit_id, {Deposits.tx_hash_out.key: tx_hash}, commit=True)
                 else:  # exception handling
                     log_params = {"deposit_id": deposit_id,
                                   "tx_handler_period": tx_handler_period,
